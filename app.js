@@ -2209,14 +2209,40 @@ const App = (() => {
     renderGeneratedTableQrs();
   };
 
-  const renderWaiterTableSelect = () => {
+  const normalizeTableLookup = (value = "") =>
+    normalizeText(value).replace(/mesa/g, "").replace(/\s+/g, "");
+
+  const waiterTableSearchScore = (table, query) => {
+    if (!query) return Number(table.table_number || 0);
+    const tableNumber = String(table.table_number || "").replace(/\s+/g, "");
+    const tableName = normalizeTableLookup(table.table_name || "");
+    const fullLabel = normalizeTableLookup(`${table.table_name || ""} mesa ${table.table_number || ""}`);
+    if (query === tableNumber) return 0;
+    if (query === tableName || query === fullLabel) return 1;
+    if (tableNumber.startsWith(query)) return 10 + tableNumber.length;
+    if (tableName.startsWith(query) || fullLabel.startsWith(query)) return 20;
+    if (tableNumber.includes(query)) return 30 + tableNumber.length;
+    if (tableName.includes(query) || fullLabel.includes(query)) return 40;
+    return Number.POSITIVE_INFINITY;
+  };
+
+  const renderWaiterTableSelect = (searchValue) => {
     const select = $("#waiterTableSelect");
     if (!select) return;
-    const activeTables = state.tables
+    const search = $("#waiterTableSearch");
+    const status = $("#waiterTableSearchStatus");
+    const query = normalizeTableLookup(searchValue === undefined ? search?.value : searchValue);
+    const scoredTables = state.tables
       .filter((table) => table.is_active !== false)
-      .sort((a, b) => Number(a.table_number || 0) - Number(b.table_number || 0));
+      .map((table) => ({ table, score: waiterTableSearchScore(table, query) }))
+      .filter((entry) => Number.isFinite(entry.score));
+    const exactMatches = query ? scoredTables.filter((entry) => entry.score <= 1) : [];
+    const activeTables = (exactMatches.length ? exactMatches : scoredTables)
+      .sort((a, b) => a.score - b.score || Number(a.table.table_number || 0) - Number(b.table.table_number || 0))
+      .map((entry) => entry.table);
+    const allActiveCount = state.tables.filter((table) => table.is_active !== false).length;
     select.innerHTML = activeTables.length
-      ? `<option value="">Selecciona una mesa...</option>${activeTables.map((table) => {
+      ? `<option value="">${query ? `${activeTables.length} resultado(s) · selecciona una mesa...` : "Selecciona una mesa..."}</option>${activeTables.map((table) => {
           const defaultName = `Mesa ${table.table_number}`;
           const name = String(table.table_name || "").trim();
           const label = name && name.toLowerCase() !== defaultName.toLowerCase()
@@ -2224,8 +2250,18 @@ const App = (() => {
             : defaultName;
           return `<option value="${escapeHTML(table.id)}">${escapeHTML(label)}</option>`;
         }).join("")}`
-      : `<option value="">No hay mesas activas</option>`;
+      : `<option value="">${allActiveCount ? "No se encontraron mesas" : "No hay mesas activas"}</option>`;
     select.disabled = activeTables.length === 0;
+    if (status) {
+      status.classList.toggle("no-results", Boolean(query && !activeTables.length));
+      status.textContent = !allActiveCount
+        ? "No hay mesas activas."
+        : query
+          ? activeTables.length
+            ? `${activeTables.length} de ${allActiveCount} mesas coinciden con la búsqueda.`
+            : `Ninguna mesa coincide con “${String(searchValue === undefined ? search?.value || "" : searchValue).trim()}”.`
+          : `${allActiveCount} mesas disponibles.`;
+    }
   };
 
   const renderMenuManager = () => {
@@ -3059,7 +3095,20 @@ const App = (() => {
       event.preventDefault();
       await saveUser(event.currentTarget);
     });
-    $("#waiterTableForm")?.addEventListener("submit", (event) => event.preventDefault());
+    $("#waiterTableSearch")?.addEventListener("input", (event) => {
+      renderWaiterTableSelect(event.currentTarget.value);
+    });
+    $("#waiterTableForm")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const select = $("#waiterTableSelect");
+      const matches = Array.from(select?.options || []).filter((option) => option.value);
+      if (matches.length === 1 && select) {
+        select.value = matches[0].value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        select?.focus({ preventScroll: true });
+      }
+    });
     $("#waiterTableSelect")?.addEventListener("change", async (event) => {
       const select = event.currentTarget;
       const tableId = select.value;
@@ -3068,6 +3117,8 @@ const App = (() => {
       try {
         await openScannedTable(tableId);
       } finally {
+        const search = $("#waiterTableSearch");
+        if (search) search.value = "";
         renderWaiterTableSelect();
       }
     });
