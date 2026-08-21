@@ -3104,25 +3104,62 @@ const App = (() => {
   };
 
   const startQrCamera = async () => {
-    if (!("BarcodeDetector" in window) || !navigator.mediaDevices?.getUserMedia) {
-      toast("Este navegador no permite lectura QR por camara. Usa el campo de codigo.", "error", "qr-camera-unsupported");
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      toast("La camara necesita abrirse desde una pagina HTTPS segura.", "error", "qr-camera-insecure");
       return;
     }
     stopQrCamera();
     const video = $("#qrCamera");
     if (!video) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      });
       state.qrCameraStream = stream;
       video.srcObject = stream;
       video.hidden = false;
       await video.play();
-      const detector = new BarcodeDetector({ formats: ["qr_code"] });
+
+      let detector = null;
+      if ("BarcodeDetector" in window) {
+        try {
+          const supported = typeof BarcodeDetector.getSupportedFormats === "function"
+            ? await BarcodeDetector.getSupportedFormats()
+            : ["qr_code"];
+          if (supported.includes("qr_code")) detector = new BarcodeDetector({ formats: ["qr_code"] });
+        } catch (error) { /* Safari y algunos WebViews exponen una implementacion incompleta. */ }
+      }
+
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!detector && (typeof window.jsQR !== "function" || !context)) {
+        stopQrCamera();
+        toast("No se pudo cargar el lector QR. Recarga la pagina e intenta de nuevo.", "error", "qr-reader-unavailable");
+        return;
+      }
+
       const scan = async () => {
         if (!state.qrCameraStream) return;
-        const codes = await detector.detect(video).catch(() => []);
-        if (codes[0]?.rawValue) {
-          const value = codes[0].rawValue;
+        let value = "";
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth && video.videoHeight) {
+          if (detector) {
+            const codes = await detector.detect(video).catch(() => []);
+            value = codes[0]?.rawValue || "";
+          } else {
+            const scale = Math.min(1, 720 / video.videoWidth);
+            canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+            canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const frame = context.getImageData(0, 0, canvas.width, canvas.height);
+            value = window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: "dontInvert" })?.data || "";
+          }
+        }
+        if (value) {
           stopQrCamera();
           await openScannedTable(value);
           return;
@@ -3132,7 +3169,15 @@ const App = (() => {
       scan();
     } catch (error) {
       stopQrCamera();
-      toast("No se pudo abrir la camara. Puedes pegar el codigo QR.", "error", "qr-camera-denied");
+      const errorName = String(error?.name || "");
+      const message = errorName === "NotAllowedError" || errorName === "SecurityError"
+        ? "Permiso de camara bloqueado. Habilitalo en la configuracion del sitio y vuelve a intentar."
+        : errorName === "NotFoundError" || errorName === "OverconstrainedError"
+          ? "No se encontro una camara disponible en este dispositivo."
+          : errorName === "NotReadableError" || errorName === "AbortError"
+            ? "La camara esta siendo usada por otra aplicacion. Cierrala y vuelve a intentar."
+            : "No se pudo iniciar la camara. Recarga la pagina y vuelve a intentar.";
+      toast(message, "error", `qr-camera-${errorName || "failed"}`);
     }
   };
 
