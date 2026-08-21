@@ -71,33 +71,15 @@ const App = (() => {
     bill: "images/check.png"
   };
   const RECEIPT_SOUND = "sound/receipt-received.mp3";
-  const ASSISTANT_MENU = [
-    { name: "Camarón Tradicional", prices: { 8: 24000, 12: 26000, 16: 31000 }, detail: "Camarón, cebolla, ajo, aceite de oliva, salsa de tomate, mayonesa, syrup, limón y cilantro." },
-    { name: "Camarón Crema de Maíz", prices: { 8: 24000, 12: 27000, 16: 31000 }, detail: "Camarón, cebolla, ajo, crema de maíz, granos de maíz tiernos, syrup, limón y cilantro." },
-    { name: "Camarón Crema de Aguacate", prices: { 8: 24000, 12: 27000, 16: 31000 }, detail: "Camarón, cebolla, ajo, mayonesa, crema de aguacate, syrup y limón." },
-    { name: "Salsa Chipotle", prices: { 8: 24000, 12: 27000, 16: 31000 }, detail: "Camarón, cebolla, granos de maíz, limón, cilantro y salsa chipotle." },
-    { name: "Flor de Jamaica", prices: { 8: 26000, 12: 28000, 16: 34000 }, detail: "Camarón, pepino, cebolla, granos de maíz, limón, cilantro, aguacate, salsa jamaica y salsa inglesa." },
-    { name: "Mixto Tradicional", prices: { 8: 26000, 12: 29000, 16: 34000 }, detail: "Camarón, caracol, palmitos, pulpo, cebolla, ajo, salsa de tomate, mayonesa, syrup, limón y cilantro." },
-    { name: "Camarón Hawái", prices: { 8: 24000, 12: 27000, 16: 31000 }, detail: "Camarón, mango, cebolla roja, ajo, salsa de tomate, mayonesa, trozos de aguacate, syrup, limón y cilantro." },
-    { name: "Camarón al Pastor", prices: { 8: 24000, 12: 27000, 16: 31000 }, detail: "Camarón, pimiento, cebolla roja, tomate, aguacate, syrup, limón y cilantro." },
-    { name: "Mixto Chipotle", prices: { 8: 26000, 12: 29000, 16: 34000 }, detail: "Camarón, caracol, palmitos, pulpo, cebolla, ajo, salsa chipotle, syrup, limón y cilantro." },
-    { name: "Mixto Crema de Maíz", prices: { 8: 27000, 12: 30000, 16: 34000 }, detail: "Camarón, caracol, palmitos, pulpo, cebolla, ajo, crema de maíz, syrup, limón y cilantro." },
-    { name: "Mixto Crema de Aguacate", prices: { 8: 27000, 12: 30000, 16: 34000 }, detail: "Camarón, caracol, palmitos, pulpo, cebolla, ajo, crema de aguacate, syrup, limón y cilantro." },
-    { name: "Camarón al Ajillo", prices: { 16: 34000 }, detail: "Camarón, cebolla, ajo, vino blanco, salsa inglesa, reducción de salsa de la casa y patacones." },
-    { name: "Trío Pacarón", prices: { 16: 29000 }, detail: "Plátano criollo, queso costeño, suero y acompañamiento de rellenos de camarón." },
-    { name: "Dúo Mix", prices: { 8: 27000, 12: 30000, 16: 34000 }, detail: "Camarón, pulpo, cebolla, ajo, salsa de tomate, mayonesa, syrup, limón y cilantro." },
-    { name: "Bomba Tradicional", prices: { 8: 27000, 12: 30000, 16: 34000 }, detail: "Camarón, caracol, palmitos, pulpo, ropa ahumada, cebolla, ajo, salsa de tomate, mayonesa y syrup." }
-  ];
   const ASSISTANT_SYSTEM_PROMPT = [
-    "Eres el asistente local de El Machín Cevichería.",
-    "Tu trabajo es atender al cliente desde su mesa con tono amable, claro y profesional.",
-    "Entiendes frases naturales para ordenar, pedir la cuenta, llamar al mesero, consultar el menú, preguntar precios o pedir ayuda.",
-    "Cuando un pedido coincide con el menú, calculas cantidad, tamaño, precio unitario y total antes de avisar al equipo.",
+    "Eres el agente virtual del bar y atiendes al cliente desde su mesa con tono amable, claro y profesional.",
+    "Entiendes frases naturales para pedir bebidas y productos, ver la cuenta, llamar al mesero, consultar la carta o preguntar precios.",
+    "Cuando un pedido coincide con la carta cargada, calculas cantidad, precio unitario y total antes de avisar al equipo.",
     "Si falta una mesa, no permites enviar pedidos ni solicitudes; primero pides verificar la mesa.",
-    "Si el cliente pregunta por ingredientes o precios, informas sin crear el pedido hasta que exprese intención de ordenar.",
+    "Si el cliente pregunta por una bebida, presentación o precio, informas sin crear el pedido hasta que exprese intención de ordenar.",
     "Si no reconoces el producto o el precio exacto, envías la solicitud al equipo para validación y se lo explicas al cliente.",
     "Siempre corriges ortografía, tildes, mayúsculas, puntos y comas en los mensajes que llegan al administrador.",
-    "No prometes disponibilidad fuera del menú cargado; confirmas con cocina cuando haga falta."
+    "No inventas bebidas, marcas, presentaciones ni precios fuera de la carta cargada; confirmas con el equipo cuando haga falta."
   ].join("\n");
 
   const ASSISTANT_INTENTS = {
@@ -121,7 +103,13 @@ const App = (() => {
       "que me recomiendas",
       "recomiendame",
       "recomendacion",
-      "platos"
+      "bebidas",
+      "cervezas",
+      "licores",
+      "cocteles",
+      "cócteles",
+      "botellas",
+      "tragos"
     ],
     order: [
       "quiero pedir",
@@ -162,7 +150,10 @@ const App = (() => {
       "precio",
       "precios",
       "de que es",
-      "como viene"
+      "como viene",
+      "presentacion",
+      "presentación",
+      "cuantos ml"
     ]
   };
 
@@ -1104,7 +1095,7 @@ const App = (() => {
           </div>
 
           <div class="receipt-method">
-            <span>${icon("utensils", 20)}</span>
+            <span>${icon("beer", 20)}</span>
             <div>
               <strong>${escapeHTML(bill.business_name || "Restaurante")}</strong>
               <small>${isLocalBill ? "Cuenta actualizada de tu mesa" : "Recibo enviado por administración"}</small>
@@ -1197,15 +1188,9 @@ const App = (() => {
 
   const polishGuestText = (text = "") => {
     const replacements = [
-      [/\bcamarones\b/gi, "camarones"],
-      [/\bcamaron\b/gi, "camarón"],
-      [/\bmaiz\b/gi, "maíz"],
-      [/\blimon\b/gi, "limón"],
-      [/\bhawai\b/gi, "Hawái"],
-      [/\bhawaiano\b/gi, "Hawái"],
-      [/\baji(ll)?o\b/gi, "ajillo"],
-      [/\bduo\b/gi, "dúo"],
-      [/\btrio\b/gi, "trío"],
+      [/\bcoctel(es)?\b/gi, (match) => match.toLowerCase().endsWith("es") ? "cócteles" : "cóctel"],
+      [/\bcerbeza(s)?\b/gi, (match) => match.toLowerCase().endsWith("s") ? "cervezas" : "cerveza"],
+      [/\bwhiskey\b/gi, "whisky"],
       [/\bmenu\b/gi, "menú"],
       [/\bpor favor\b/gi, "por favor"],
       [/\bq\b/gi, "que"],
@@ -1218,10 +1203,10 @@ const App = (() => {
     return sentenceCase(polished);
   };
 
-  const assistantMenuSummary = () =>
-    ASSISTANT_MENU.slice(0, 6)
-      .map((item) => item.name)
-      .join(", ");
+  const assistantMenuSummary = () => {
+    const names = assistantOptions().slice(0, 6).map((item) => item.name);
+    return names.join(", ");
+  };
 
   const assistantPriceList = (item) =>
     Object.entries(item.prices)
@@ -1234,23 +1219,18 @@ const App = (() => {
     return found ? ASSISTANT_NUMBER_WORDS[found] : null;
   };
 
-  const assistantOptions = () => [
-    ...ASSISTANT_MENU,
-    ...state.items
+  const assistantOptions = () =>
+    state.items
       .filter((item) => item.is_available)
       .map((item) => ({
         name: item.name,
         prices: { default: Number(item.price || 0) },
-        detail: item.description || "Producto del menú del restaurante.",
+        detail: item.description || "Producto disponible en la carta del bar.",
         menu_item_id: item.id
-      }))
-  ];
+      }));
 
   const findAssistantItem = (message) => {
-    const normalized = normalizeText(message)
-      .replace(/\bhawaiano\b/g, "hawai")
-      .replace(/\bcriollo\b/g, "pacaron")
-      .replace(/\bpacaron\b/g, "pacaron");
+    const normalized = normalizeText(message);
     let best = null;
     assistantOptions().forEach((item) => {
       const words = normalizeText(item.name).split(" ").filter((word) => word.length > 2);
@@ -1264,7 +1244,7 @@ const App = (() => {
     const item = findAssistantItem(message);
     if (!item) return null;
     const normalized = normalizeText(message);
-    const quantityMatch = normalized.match(/\b(\d+)\s*x\b|\b(\d+)\s+(?:unidades|ordenes|platos)\b/);
+    const quantityMatch = normalized.match(/\b(\d+)\s*x\b|\b(\d+)\s+(?:unidades|ordenes|botellas|cervezas|tragos|cocteles|bebidas)\b/);
     const sizeMatch = normalized.match(/\b(8|12|16)\s*(?:oz|onzas|onza)?\b/);
     const sizes = Object.keys(item.prices);
     const size = sizeMatch?.[1] && item.prices[sizeMatch[1]]
@@ -1289,13 +1269,15 @@ const App = (() => {
     if (!chat || !suggestions) return;
     const messages = state.assistantMessages.length
       ? state.assistantMessages
-      : [{ role: "bot", text: "Hola. Soy el asistente de la mesa. Puedo ayudarte a ordenar ceviches, consultar precios, ver tu cuenta o llamar al mesero. Escribe, por ejemplo: Quiero un Camarón Hawái de 12 onzas." }];
+      : [{ role: "bot", text: "Hola. Soy tu agente de bar. Puedo ayudarte a consultar la carta, pedir bebidas y productos, ver tu cuenta o llamar al mesero." }];
     chat.innerHTML = messages
       .map((message) => `<div class="assistant-message ${message.role}">${escapeHTML(message.text)}</div>`)
       .join("");
     chat.scrollTop = chat.scrollHeight;
-    suggestions.innerHTML = ["Camarón Hawái 12 onzas", "Mixto Chipotle 16 onzas", "¿Qué puedes hacer por mí?"]
-      .map((text) => `<button type="button" class="chip" data-assistant-suggest="${text}">${text}</button>`)
+    const productSuggestions = assistantOptions().slice(0, 2).map((item) => `Quiero ${item.name}`);
+    const suggestionTexts = [...productSuggestions, "¿Qué bebidas tienen?", "Ver mi cuenta", "Llamar al mesero"].slice(0, 3);
+    suggestions.innerHTML = suggestionTexts
+      .map((text) => `<button type="button" class="chip" data-assistant-suggest="${escapeHTML(text)}">${escapeHTML(text)}</button>`)
       .join("");
     refreshIcons();
   };
@@ -1497,15 +1479,21 @@ const App = (() => {
     const wantsOrder = assistantUnderstands(normalized, "order") || Boolean(item && !asksInquiry);
 
     if (asksCapabilities && !wantsOrder && !asksMenu && !asksBill && !asksWaiter) {
-      assistantSay("bot", "Puedo ayudarte a ver opciones del menú, consultar precios, ordenar para tu mesa, ver tu cuenta o llamar al mesero. Si algo no aparece con precio exacto, lo envío al equipo para confirmación.");
+      assistantSay("bot", "Soy tu agente de bar. Puedo mostrarte la carta, consultar precios, pedir bebidas o productos, ver tu cuenta y llamar al mesero. Si algo no aparece con precio exacto, lo envío al equipo para confirmación.");
       return;
     }
     if (asksMenu && !item) {
-      assistantSay("bot", `Tenemos ceviches y mixtos como ${assistantMenuSummary()}. Puedes escribir el nombre, las onzas y la cantidad; por ejemplo: dos Mixto Chipotle de 16 onzas.`);
+      const summary = assistantMenuSummary();
+      assistantSay("bot", summary
+        ? `En la carta tenemos ${summary}. Puedes escribir el nombre del producto y la cantidad que deseas.`
+        : "La carta del bar se está actualizando. Puedes llamar al mesero para consultar las opciones disponibles.");
       return;
     }
     if (wantsOrder && !item && normalized.split(" ").length <= 3) {
-      assistantSay("bot", `Claro. Puedes pedir opciones como ${assistantMenuSummary()}. Escríbeme el plato, tamaño y cantidad; por ejemplo: quiero dos Camarón Hawái de 12 onzas.`);
+      const summary = assistantMenuSummary();
+      assistantSay("bot", summary
+        ? `Claro. Puedes pedir opciones como ${summary}. Escríbeme el nombre exacto de la bebida o producto y la cantidad.`
+        : "Dime el nombre de la bebida o producto que deseas y lo enviaré al equipo para confirmación.");
       return;
     }
     if (item && (asksInquiry || asksMenu) && !assistantUnderstands(normalized, "order")) {
