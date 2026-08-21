@@ -3055,13 +3055,27 @@ const App = (() => {
   };
 
   const openScannedTable = async (value) => {
-    const table = tableFromScannedValue(value);
+    const input = $("#waiterQrForm [name='qr_value']");
+    if (input) input.value = String(value || "").trim();
+    let table = tableFromScannedValue(value);
+    if (!table) {
+      await loadCore();
+      table = tableFromScannedValue(value);
+    }
     if (!table) {
       toast("QR no reconocido. Verifica que pertenezca a una mesa activa.", "error", "unknown-table-qr");
       return;
     }
     toast(`${tableLabel(table)} identificada.`, "ok", `scanned:${table.id}`);
     let session = state.sessions.find((entry) => entry.table_id === table.id && entry.status === "open");
+    if (!session) {
+      session = await dbQuiet(
+        state.sb.from("table_sessions").select("*")
+          .eq("table_id", table.id).eq("status", "open")
+          .order("opened_at", { ascending: false }).limit(1).maybeSingle(),
+        null
+      );
+    }
     if (!session) {
       session = await dbQuiet(
         state.sb.from("table_sessions").insert({
@@ -3071,14 +3085,29 @@ const App = (() => {
         }).select("*").single(),
         null
       );
-      if (session) {
-        session = { ...session, restaurant_tables: table, assigned_waiter: state.currentUser, session_items: [] };
-        state.sessions = [session, ...state.sessions];
+      // Si otro dispositivo abrió la mesa al mismo tiempo, usa la sesión ganadora.
+      if (!session) {
+        session = await dbQuiet(
+          state.sb.from("table_sessions").select("*")
+            .eq("table_id", table.id).eq("status", "open")
+            .order("opened_at", { ascending: false }).limit(1).maybeSingle(),
+          null
+        );
       }
-    } else if (state.currentUser?.id && session.assigned_waiter_id !== state.currentUser.id) {
+    }
+    if (session) {
+      session = {
+        ...session,
+        restaurant_tables: table,
+        assigned_waiter: state.currentUser,
+        session_items: session.session_items || []
+      };
+      state.sessions = [session, ...state.sessions.filter((entry) => entry.id !== session.id)];
+    }
+    if (session && state.currentUser?.id && session.assigned_waiter_id !== state.currentUser.id) {
       session = { ...session, assigned_waiter_id: state.currentUser.id, assigned_waiter: state.currentUser };
       state.sessions = state.sessions.map((entry) => entry.id === session.id ? session : entry);
-      void dbQuiet(
+      await dbQuiet(
         state.sb.from("table_sessions").update({ assigned_waiter_id: state.currentUser.id }).eq("id", session.id).select("*").single(),
         null
       );
@@ -3148,15 +3177,21 @@ const App = (() => {
         let value = "";
         if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth && video.videoHeight) {
           if (detector) {
-            const codes = await detector.detect(video).catch(() => []);
-            value = codes[0]?.rawValue || "";
-          } else {
+            try {
+              const codes = await detector.detect(video);
+              value = codes[0]?.rawValue || "";
+            } catch (error) {
+              detector = null;
+            }
+          }
+          // Algunos móviles exponen BarcodeDetector pero no decodifican video correctamente.
+          if (!value && typeof window.jsQR === "function" && context) {
             const scale = Math.min(1, 720 / video.videoWidth);
             canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
             canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             const frame = context.getImageData(0, 0, canvas.width, canvas.height);
-            value = window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: "dontInvert" })?.data || "";
+            value = window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: "attemptBoth" })?.data || "";
           }
         }
         if (value) {
