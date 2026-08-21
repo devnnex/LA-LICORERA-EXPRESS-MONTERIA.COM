@@ -164,6 +164,19 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
   }
 }
 
+/* Safari hace zoom automatico al enfocar controles con texto menor a 16 px. */
+@media (pointer: coarse), (max-width: 900px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  .service-table-picker select {
+    font-size: 1.12rem !important;
+  }
+}
+
 .service-table-picker p {
   display: flex;
   align-items: center;
