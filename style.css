@@ -136,12 +136,32 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
 }
 
 .service-table-picker select {
-  min-height: 58px;
-  padding-inline: 1rem;
+  min-height: 72px;
+  padding: 1rem 3rem 1rem 1.15rem;
   border: 2px solid color-mix(in srgb, var(--accent) 46%, var(--line));
   background: var(--surface);
-  font-size: 1rem;
+  font-size: 1.08rem;
   font-weight: 800;
+  line-height: 1.35;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.service-table-picker select option {
+  padding-block: .85rem;
+  font-size: 1.05rem;
+}
+
+@media (max-width: 640px) {
+  .service-table-picker {
+    padding: 1.15rem;
+  }
+
+  .service-table-picker select {
+    min-height: 78px;
+    padding-block: 1.15rem;
+    font-size: 1.12rem;
+  }
 }
 
 .service-table-picker p {
