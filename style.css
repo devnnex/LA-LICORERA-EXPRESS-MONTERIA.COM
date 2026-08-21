@@ -110,6 +110,21 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
   background: rgba(57, 217, 138, .1);
 }
 
+.qr-camera-choice {
+  margin-top: .25rem;
+}
+
+.qr-camera:not([hidden]) {
+  display: block;
+  width: min(100%, 760px);
+  max-height: 68vh;
+  margin: 1rem auto 0;
+  border-radius: 18px;
+  background: #090b0f;
+  object-fit: cover;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .24);
+}
+
 button, input, select, textarea {
   font: inherit;
 }

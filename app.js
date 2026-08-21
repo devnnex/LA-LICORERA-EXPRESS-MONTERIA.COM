@@ -235,6 +235,8 @@ const App = (() => {
     billResolutionTimer: null,
     qrCameraStream: null,
     qrScanner: null,
+    qrScannerControls: null,
+    qrCameraDevices: [],
     qrScanBusy: false,
     subscriptions: []
   };
@@ -602,6 +604,11 @@ const App = (() => {
     const params = new URLSearchParams(location.search);
     const code = params.get("mesa") || params.get("table") || params.get("t") || params.get("qr") || "none";
     return `el_machin_supabase_bootstrap_v2_${state.page}_${state.authToken ? "staff" : encodeURIComponent(code)}`;
+  };
+
+  const tableValueFromUrl = () => {
+    const params = new URLSearchParams(location.search);
+    return params.get("mesa") || params.get("table") || params.get("t") || params.get("qr") || "";
   };
   const persistBootstrapCache = () => {
     try {
@@ -1670,10 +1677,26 @@ const App = (() => {
 
   const initClient = async () => {
     setLoading(true);
+    const nativeScanValue = tableValueFromUrl();
+    if (nativeScanValue && localStorage.getItem("el_machin_admin_token")) {
+      const adminUrl = new URL("admin.html", location.href);
+      adminUrl.searchParams.set("scan", nativeScanValue);
+      adminUrl.hash = "service";
+      location.replace(adminUrl.href);
+      return;
+    }
     await loadBootstrap();
     renderBrand();
     state.currentTable = findTableFromUrl();
     if (state.currentTable) {
+      const adminLink = $(".admin-link");
+      if (adminLink) {
+        const adminUrl = new URL("admin.html", location.href);
+        adminUrl.searchParams.set("scan", tableCode(state.currentTable));
+        adminUrl.hash = "service";
+        adminLink.href = adminUrl.href;
+        adminLink.title = "Atender esta mesa desde el panel";
+      }
       state.sb.setTableAccess(state.currentTable.id, tableCode(state.currentTable));
       state.tableAccountStatus = "checking";
       void flushBillResolutionOutbox();
@@ -2959,7 +2982,10 @@ const App = (() => {
       event.currentTarget.qr_value.value = "";
       await openScannedTable(value);
     });
-    $("#cameraQrButton")?.addEventListener("click", startPowerfulQrCamera);
+    $("#cameraQrButton")?.addEventListener("click", () => { void startPowerfulQrCamera(); });
+    $("#qrCameraSelect")?.addEventListener("change", async (event) => {
+      if (event.target.value) await startPowerfulQrCamera(event.target.value);
+    });
     $("#imageQrButton")?.addEventListener("click", () => $("#qrImageInput")?.click());
     $("#qrImageInput")?.addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
@@ -3233,20 +3259,20 @@ const App = (() => {
   };
 
   const stopPowerfulQrCamera = async (keepStatus = false) => {
+    const controls = state.qrScannerControls;
+    state.qrScannerControls = null;
+    try { controls?.stop?.(); } catch (error) { /* El stream pudo cerrarse antes. */ }
     const scanner = state.qrScanner;
     state.qrScanner = null;
-    if (scanner) {
-      try {
-        if (scanner.isScanning) await scanner.stop();
-      } catch (error) { /* El navegador pudo cerrar el stream antes que la libreria. */ }
-      try { await Promise.resolve(scanner.clear()); } catch (error) { /* Limpieza opcional. */ }
-    }
+    try { scanner?.reset?.(); } catch (error) { /* Limpieza opcional de ZXing. */ }
     stopQrCamera();
     const reader = $("#qrReader");
     if (reader) {
       reader.hidden = true;
       reader.innerHTML = "";
     }
+    const choice = $("#qrCameraChoice");
+    if (choice) choice.hidden = true;
     if (!keepStatus) setQrScanStatus("");
   };
 
@@ -3279,46 +3305,98 @@ const App = (() => {
     return "No se pudo iniciar el lector. Prueba con Leer foto QR.";
   };
 
-  const startPowerfulQrCamera = async () => {
-    if (!window.isSecureContext) {
+  const cameraName = (device, index) => device.label?.trim() || `Camara ${index + 1}`;
+
+  const cameraScore = (device) => {
+    const label = String(device?.label || "").toLowerCase();
+    let score = 0;
+    if (/back|rear|environment|trasera|posterior|traseira/.test(label)) score += 100;
+    if (/front|user|frontal/.test(label)) score -= 200;
+    if (/ultra|tele|macro|depth|0[.,]5|2x|3x/.test(label)) score -= 70;
+    if (/\b1x\b|back camera$|rear camera$|camara trasera$|cámara trasera$/.test(label)) score += 40;
+    return score;
+  };
+
+  const populateQrCameraSelect = (devices, selectedId) => {
+    state.qrCameraDevices = devices || [];
+    const select = $("#qrCameraSelect");
+    const choice = $("#qrCameraChoice");
+    if (!select || !choice) return;
+    select.innerHTML = state.qrCameraDevices.map((device, index) =>
+      `<option value="${escapeHTML(device.deviceId)}">${escapeHTML(cameraName(device, index))}</option>`
+    ).join("");
+    if (selectedId && state.qrCameraDevices.some((device) => device.deviceId === selectedId)) {
+      select.value = selectedId;
+    }
+    choice.hidden = state.qrCameraDevices.length < 2;
+  };
+
+  const improveQrCameraFocus = async () => {
+    const track = $("#qrCamera")?.srcObject?.getVideoTracks?.()[0];
+    if (!track?.applyConstraints || !track?.getCapabilities) return;
+    try {
+      const capabilities = track.getCapabilities();
+      const advanced = [];
+      if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes("continuous")) {
+        advanced.push({ focusMode: "continuous" });
+      }
+      if (advanced.length) await track.applyConstraints({ advanced });
+    } catch (error) { /* No todos los Safari aceptan restricciones avanzadas. */ }
+  };
+
+  const startPowerfulQrCamera = async (preferredDeviceId = "") => {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       toast("La camara requiere abrir el panel desde HTTPS.", "error", "qr-camera-insecure");
       return;
     }
-    if (typeof window.Html5Qrcode !== "function") {
-      toast("El lector avanzado no cargo. Recarga la pagina con conexion a internet.", "error", "qr-library-missing");
+    if (typeof window.ZXingBrowser?.BrowserQRCodeReader !== "function") {
+      toast("El motor ZXing no cargo. Recarga la pagina con conexion a internet.", "error", "qr-library-missing");
       return;
     }
     await stopPowerfulQrCamera();
     state.qrScanBusy = false;
-    const reader = $("#qrReader");
-    if (!reader) return;
-    reader.hidden = false;
+    const video = $("#qrCamera");
+    if (!video) return;
+    video.hidden = false;
     setQrScanStatus("Solicitando la camara trasera...", "scanning");
     try {
-      const cameras = await window.Html5Qrcode.getCameras();
-      if (!cameras?.length) throw new Error("NotFoundError: no camera devices");
-      const rearPattern = /back|rear|environment|trasera|posterior|traseira/i;
-      const camera = cameras.find((entry) => rearPattern.test(entry.label || "")) || cameras[cameras.length - 1];
-      const scanner = new window.Html5Qrcode("qrReader", {
-        formatsToSupport: [window.Html5QrcodeSupportedFormats.QR_CODE],
-        verbose: false
+      let cameras = [];
+      try {
+        cameras = await window.ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+      } catch (error) { /* Algunos Safari no enumeran dispositivos antes de autorizar. */ }
+      const ranked = [...cameras].sort((a, b) => cameraScore(b) - cameraScore(a));
+      const labelsAvailable = cameras.some((entry) => String(entry.label || "").trim());
+      let selectedId = preferredDeviceId && cameras.some((entry) => entry.deviceId === preferredDeviceId)
+        ? preferredDeviceId
+        : labelsAvailable ? ranked[0]?.deviceId : "";
+      populateQrCameraSelect(cameras, selectedId);
+      const scanner = new window.ZXingBrowser.BrowserQRCodeReader(undefined, {
+        delayBetweenScanAttempts: 70,
+        delayBetweenScanSuccess: 500,
+        tryPlayVideoTimeout: 5000
       });
       state.qrScanner = scanner;
-      await scanner.start(
-        camera.id,
-        {
-          fps: 15,
-          qrbox: (width, height) => {
-            const edge = Math.max(180, Math.floor(Math.min(width, height) * 0.72));
-            return { width: edge, height: edge };
-          },
-          disableFlip: false,
-          experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-        },
-        (decodedText) => { void handleDecodedQr(decodedText); },
-        () => undefined
-      );
-      setQrScanStatus("Lector activo. Centra el QR dentro del recuadro.", "scanning");
+      const videoConstraints = selectedId
+        ? { deviceId: { exact: selectedId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        : { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+      const controls = await scanner.decodeFromConstraints({ video: videoConstraints, audio: false }, video, (result, error) => {
+        if (result) void handleDecodedQr(result.getText?.() || result.text || String(result));
+        // NotFoundException es normal: ZXing la emite en cada cuadro sin codigo.
+        if (error && !/notfoundexception/i.test(String(error?.name || error))) {
+          console.debug("QR frame:", error);
+        }
+      });
+      state.qrScannerControls = controls;
+      state.qrCameraStream = video.srcObject;
+      await improveQrCameraFocus();
+      selectedId = video.srcObject?.getVideoTracks?.()[0]?.getSettings?.().deviceId || selectedId;
+
+      // Los nombres completos aparecen despues de conceder permiso en varios moviles.
+      try {
+        cameras = await window.ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+        populateQrCameraSelect(cameras, selectedId);
+      } catch (error) { /* El lector ya funciona aunque el navegador oculte la lista. */ }
+      setQrScanStatus("Lector ZXing activo. Acerca el QR hasta que se vea nitido; si no enfoca, cambia la camara.", "scanning");
     } catch (error) {
       await stopPowerfulQrCamera();
       const message = qrCameraErrorMessage(error);
@@ -3328,28 +3406,24 @@ const App = (() => {
   };
 
   const scanQrImage = async (file) => {
-    if (typeof window.Html5Qrcode !== "function") {
-      toast("El lector avanzado no cargo. Recarga la pagina.", "error", "qr-library-missing-file");
+    if (typeof window.ZXingBrowser?.BrowserQRCodeReader !== "function") {
+      toast("El motor ZXing no cargo. Recarga la pagina.", "error", "qr-library-missing-file");
       return;
     }
     await stopPowerfulQrCamera();
-    const reader = $("#qrReader");
-    if (!reader) return;
-    reader.hidden = false;
     setQrScanStatus("Analizando la imagen...", "scanning");
-    const scanner = new window.Html5Qrcode("qrReader", {
-      formatsToSupport: [window.Html5QrcodeSupportedFormats.QR_CODE],
-      verbose: false
-    });
-    state.qrScanner = scanner;
+    const imageUrl = URL.createObjectURL(file);
     try {
-      const decodedText = await scanner.scanFile(file, true);
-      await handleDecodedQr(decodedText);
+      const scanner = new window.ZXingBrowser.BrowserQRCodeReader();
+      const result = await scanner.decodeFromImageUrl(imageUrl);
+      await handleDecodedQr(result.getText?.() || result.text || String(result));
     } catch (error) {
       await stopPowerfulQrCamera();
       const message = "No se encontro un QR legible en la imagen. Acercate y evita reflejos.";
       setQrScanStatus(message, "error");
       toast(message, "error", "qr-image-not-readable");
+    } finally {
+      URL.revokeObjectURL(imageUrl);
     }
   };
 
@@ -3522,9 +3596,10 @@ const App = (() => {
 
   const initAdmin = async () => {
     setLoading(true);
+    const pendingScan = new URLSearchParams(location.search).get("scan") || "";
     await waitForAdminLogin();
     state.soundEnabled = localStorage.getItem("waiter_alarm_enabled") === "1";
-    const initialSection = location.hash.replace("#", "") || "dashboard";
+    const initialSection = pendingScan ? "service" : (location.hash.replace("#", "") || "dashboard");
     renderAdmin();
     renderUsers();
     showAdminSection(initialSection);
@@ -3540,8 +3615,14 @@ const App = (() => {
     renderTableFormQr();
     startAdminPolling();
     void loadUsers().then(renderUsers);
+    if (pendingScan) {
+      const cleanUrl = new URL(location.href);
+      cleanUrl.searchParams.delete("scan");
+      history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}#service`);
+      await openScannedTable(pendingScan);
+    }
     // El shell queda visible al instante; el snapshot pesado llega sin bloquear la interfaz.
-    refreshAdminNow();
+    void refreshAdminNow();
   };
 
   const init = async () => {

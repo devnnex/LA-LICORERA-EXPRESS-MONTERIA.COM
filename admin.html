@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Admin - Servicio a la mesa</title>
     <link rel="preconnect" href="https://unpkg.com">
-    <link rel="stylesheet" href="style.css?v=20260820-1">
+    <link rel="stylesheet" href="style.css?v=20260820-2">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   </head>
   <body data-page="admin">
@@ -224,6 +224,9 @@
           <button class="ghost" type="button" id="cameraQrButton"><i data-lucide="camera"></i> Usar camara</button>
           <button class="ghost" type="button" id="imageQrButton"><i data-lucide="image"></i> Leer foto QR</button>
           <input id="qrImageInput" type="file" accept="image/*" capture="environment" hidden>
+          <label class="wide qr-camera-choice" id="qrCameraChoice" hidden>Camara activa
+            <select id="qrCameraSelect" aria-label="Seleccionar camara"></select>
+          </label>
         </form>
         <p class="qr-scan-status" id="qrScanStatus" role="status" aria-live="polite" hidden></p>
         <div id="qrReader" class="qr-reader" hidden></div>
@@ -280,7 +283,7 @@
 
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-    <script src="app.js?v=20260820-3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.2.0/umd/zxing-browser.min.js"></script>
+    <script src="app.js?v=20260820-4"></script>
   </body>
 </html>
