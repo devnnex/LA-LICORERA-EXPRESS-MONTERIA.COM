@@ -55,7 +55,7 @@ const SupabaseDb = (() => {
 const App = (() => {
   const REQUEST_LABELS = {
     waiter: "Llamar mesero",
-    bill: "Pedir la cuenta",
+    bill: "Ver cuenta",
     other: "Necesito ayuda"
   };
 
@@ -194,6 +194,7 @@ const App = (() => {
     clientRequests: [],
     tableAccountStatus: "idle",
     tableAccountTotal: 0,
+    localBillOpen: false,
     clientHydrationToken: 0,
     billReceiptArmedIds: new Set(),
     requests: [],
@@ -1042,25 +1043,42 @@ const App = (() => {
     const box = $("#billChat");
     if (!box) return;
     if (box.classList.contains("is-closing")) return;
-    const request = latestClientBill();
-    const bill = parseBillMessage(request?.message);
+    const isLocalBill = state.localBillOpen && Boolean(state.currentTable);
+    const localSession = isLocalBill ? {
+      ...(state.currentSession || {}),
+      id: state.currentSession?.id || state.currentTable.id,
+      restaurant_tables: state.currentTable,
+      session_items: state.sessionItems
+    } : null;
+    const request = isLocalBill
+      ? {
+          id: localSession.id,
+          status: "current",
+          created_at: new Date().toISOString(),
+          table_id: state.currentTable.id,
+          session_id: state.currentSession?.id || null
+        }
+      : latestClientBill();
+    const bill = isLocalBill
+      ? parseBillMessage(buildBillMessage(localSession))
+      : parseBillMessage(request?.message);
     if (!request || !bill) {
       document.body.classList.remove("receipt-open");
       box.hidden = true;
       box.innerHTML = "";
       return;
     }
-    playReceiptSound(request.id);
+    if (!isLocalBill) playReceiptSound(request.id);
     const sent = billDateParts(bill.sent_at || request.acknowledged_at || request.created_at);
     box.hidden = false;
     box.classList.remove("is-closing");
     document.body.classList.add("receipt-open");
     box.innerHTML = `
       <div class="client-receipt-overlay" role="presentation">
-        <article class="client-receipt-ticket" role="dialog" aria-modal="true" aria-label="Cuenta enviada" data-receipt-id="${escapeHTML(request.id)}">
+        <article class="client-receipt-ticket" role="dialog" aria-modal="true" aria-label="${isLocalBill ? "Cuenta actual" : "Cuenta enviada"}" data-receipt-id="${escapeHTML(request.id)}">
           <div class="receipt-confetti">✓</div>
-          <h2>${request.status === "resolved" ? "Gracias" : "Cuenta lista"}</h2>
-          <p>${request.status === "resolved" ? "Tu confirmación fue recibida correctamente." : "El equipo envió el recibo de tu mesa."}</p>
+          <h2>${isLocalBill ? "Tu cuenta" : request.status === "resolved" ? "Gracias" : "Cuenta lista"}</h2>
+          <p>${isLocalBill ? `Consumos registrados actualmente en ${escapeHTML(tableLabel(state.currentTable))}.` : request.status === "resolved" ? "Tu confirmación fue recibida correctamente." : "El equipo envió el recibo de tu mesa."}</p>
 
           <div class="receipt-dash"></div>
 
@@ -1089,7 +1107,7 @@ const App = (() => {
             <span>${icon("utensils", 20)}</span>
             <div>
               <strong>${escapeHTML(bill.business_name || "Restaurante")}</strong>
-              <small>Recibo enviado por administración</small>
+              <small>${isLocalBill ? "Cuenta actualizada de tu mesa" : "Recibo enviado por administración"}</small>
             </div>
           </div>
 
@@ -1116,9 +1134,11 @@ const App = (() => {
           </div>
 
           ${
-            request.status === "resolved"
-              ? `<div class="receipt-confirmed">${icon("badge-check", 17)} Confirmado</div>`
-              : `<button class="primary thank-btn receipt-thanks" data-thank-bill="${request.id}">${icon("send", 16)} Gracias</button>`
+            isLocalBill
+              ? `<button class="primary thank-btn receipt-thanks" data-close-bill>${icon("x", 16)} Cerrar</button>`
+              : request.status === "resolved"
+                ? `<div class="receipt-confirmed">${icon("badge-check", 17)} Confirmado</div>`
+                : `<button class="primary thank-btn receipt-thanks" data-thank-bill="${request.id}">${icon("send", 16)} Gracias</button>`
           }
           <div class="receipt-cutout-row" aria-hidden="true"></div>
         </article>
@@ -1126,6 +1146,22 @@ const App = (() => {
     `;
     refreshIcons();
     window.requestAnimationFrame(() => box.querySelector(".receipt-thanks")?.focus({ preventScroll: true }));
+  };
+
+  const showCurrentBill = async () => {
+    if (!state.currentTable) {
+      toast("Selecciona tu mesa primero.", "error");
+      return;
+    }
+    const button = document.querySelector('[data-request="bill"]');
+    button?.classList.add("is-pending");
+    try {
+      await hydrateSelectedTable(state.currentTable.id);
+      state.localBillOpen = true;
+      renderBillChat();
+    } finally {
+      button?.classList.remove("is-pending");
+    }
   };
 
   const normalizeText = (text = "") =>
@@ -1253,7 +1289,7 @@ const App = (() => {
     if (!chat || !suggestions) return;
     const messages = state.assistantMessages.length
       ? state.assistantMessages
-      : [{ role: "bot", text: "Hola. Soy el asistente de la mesa. Puedo ayudarte a ordenar ceviches, consultar precios, pedir la cuenta o llamar al mesero. Escribe, por ejemplo: Quiero un Camarón Hawái de 12 onzas." }];
+      : [{ role: "bot", text: "Hola. Soy el asistente de la mesa. Puedo ayudarte a ordenar ceviches, consultar precios, ver tu cuenta o llamar al mesero. Escribe, por ejemplo: Quiero un Camarón Hawái de 12 onzas." }];
     chat.innerHTML = messages
       .map((message) => `<div class="assistant-message ${message.role}">${escapeHTML(message.text)}</div>`)
       .join("");
@@ -1280,9 +1316,9 @@ const App = (() => {
       const value = JSON.parse(localStorage.getItem(REQUEST_OUTBOX_KEY) || "[]");
       const stored = Array.isArray(value) ? value : [];
       const merged = new Map([...state.requestOutboxMemory, ...stored].map((item) => [item.request_id, item]));
-      return Array.from(merged.values());
+      return Array.from(merged.values()).filter((item) => item.request_type !== "bill");
     } catch (error) {
-      return [...state.requestOutboxMemory];
+      return state.requestOutboxMemory.filter((item) => item.request_type !== "bill");
     }
   };
 
@@ -1461,7 +1497,7 @@ const App = (() => {
     const wantsOrder = assistantUnderstands(normalized, "order") || Boolean(item && !asksInquiry);
 
     if (asksCapabilities && !wantsOrder && !asksMenu && !asksBill && !asksWaiter) {
-      assistantSay("bot", "Puedo ayudarte a ver opciones del menú, consultar precios, ordenar para tu mesa, pedir la cuenta o llamar al mesero. Si algo no aparece con precio exacto, lo envío al equipo para confirmación.");
+      assistantSay("bot", "Puedo ayudarte a ver opciones del menú, consultar precios, ordenar para tu mesa, ver tu cuenta o llamar al mesero. Si algo no aparece con precio exacto, lo envío al equipo para confirmación.");
       return;
     }
     if (asksMenu && !item) {
@@ -1481,8 +1517,8 @@ const App = (() => {
       return;
     }
     if (asksBill) {
-      void createRequest("bill");
-      assistantSay("bot", "Listo, pedí la cuenta para tu mesa. Cuando el equipo la envíe, aparecerá aquí como recibo.");
+      await showCurrentBill();
+      assistantSay("bot", "Te mostré la cuenta actual de tu mesa. Puedes consultarla nuevamente cuando quieras.");
       return;
     }
     if (asksWaiter) {
@@ -1527,6 +1563,7 @@ const App = (() => {
   };
 
   const createRequest = (type, message = "") => {
+    if (type === "bill") return showCurrentBill();
     if (!state.currentTable) {
       toast("Selecciona tu mesa primero.", "error");
       return null;
@@ -1584,12 +1621,28 @@ const App = (() => {
     }, 320);
   };
 
+  const closeCurrentBill = () => {
+    const box = $("#billChat");
+    if (!state.localBillOpen || box?.classList.contains("is-closing")) return;
+    state.localBillOpen = false;
+    box?.classList.add("is-closing");
+    window.setTimeout(() => {
+      if (!box) return;
+      box.hidden = true;
+      box.innerHTML = "";
+      box.classList.remove("is-closing");
+      document.body.classList.remove("receipt-open");
+      document.querySelector('[data-request="bill"]')?.focus({ preventScroll: true });
+    }, 320);
+  };
+
   const bindClient = () => {
     document.addEventListener("click", async (event) => {
       const category = event.target.closest("[data-category]");
       const add = event.target.closest("[data-add-item]");
       const request = event.target.closest("[data-request]");
       const thanks = event.target.closest("[data-thank-bill]");
+      const closeBill = event.target.closest("[data-close-bill]");
       const change = event.target.closest("[data-action='change-table']");
       const suggestion = event.target.closest("[data-assistant-suggest]");
 
@@ -1600,10 +1653,12 @@ const App = (() => {
       if (add) await addItemToSession(add.dataset.addItem);
       if (request) await createRequest(request.dataset.request);
       if (thanks) thankBill(thanks.dataset.thankBill);
+      if (closeBill) closeCurrentBill();
       if (suggestion) await handleAssistantMessage(suggestion.dataset.assistantSuggest);
       if (change && !state.tableLocked) {
         clearInterval(state.clientPollTimer);
         state.clientHydrationToken += 1;
+        state.localBillOpen = false;
         state.currentTable = null;
         state.currentSession = null;
         state.tableAccountStatus = "idle";
@@ -1621,6 +1676,7 @@ const App = (() => {
 
     document.addEventListener("change", async (event) => {
       if (event.target.id === "tableSelect") {
+        state.localBillOpen = false;
         state.currentTable = state.tables.find((table) => table.id === event.target.value) || null;
         if (state.currentTable) {
           state.sb.setTableAccess(state.currentTable.id, tableCode(state.currentTable));
