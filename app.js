@@ -2146,6 +2146,25 @@ const App = (() => {
     renderGeneratedTableQrs();
   };
 
+  const renderWaiterTableSelect = () => {
+    const select = $("#waiterTableSelect");
+    if (!select) return;
+    const activeTables = state.tables
+      .filter((table) => table.is_active !== false)
+      .sort((a, b) => Number(a.table_number || 0) - Number(b.table_number || 0));
+    select.innerHTML = activeTables.length
+      ? `<option value="">Selecciona una mesa...</option>${activeTables.map((table) => {
+          const defaultName = `Mesa ${table.table_number}`;
+          const name = String(table.table_name || "").trim();
+          const label = name && name.toLowerCase() !== defaultName.toLowerCase()
+            ? `${name} (${defaultName})`
+            : defaultName;
+          return `<option value="${escapeHTML(table.id)}">${escapeHTML(label)}</option>`;
+        }).join("")}`
+      : `<option value="">No hay mesas activas</option>`;
+    select.disabled = activeTables.length === 0;
+  };
+
   const renderMenuManager = () => {
     const categorySelects = $$(".js-category-select");
     categorySelects.forEach((select) => {
@@ -2359,6 +2378,7 @@ const App = (() => {
     renderTables();
     renderBusinessForm();
     renderTableManager();
+    renderWaiterTableSelect();
     renderMenuManager();
     renderAccounts();
   };
@@ -2976,21 +2996,17 @@ const App = (() => {
       event.preventDefault();
       await saveUser(event.currentTarget);
     });
-    $("#waiterQrForm")?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const value = event.currentTarget.qr_value.value;
-      event.currentTarget.qr_value.value = "";
-      await openScannedTable(value);
-    });
-    $("#cameraQrButton")?.addEventListener("click", () => { void startPowerfulQrCamera(); });
-    $("#qrCameraSelect")?.addEventListener("change", async (event) => {
-      if (event.target.value) await startPowerfulQrCamera(event.target.value);
-    });
-    $("#imageQrButton")?.addEventListener("click", () => $("#qrImageInput")?.click());
-    $("#qrImageInput")?.addEventListener("change", async (event) => {
-      const file = event.target.files?.[0];
-      event.target.value = "";
-      if (file) await scanQrImage(file);
+    $("#waiterTableForm")?.addEventListener("submit", (event) => event.preventDefault());
+    $("#waiterTableSelect")?.addEventListener("change", async (event) => {
+      const select = event.currentTarget;
+      const tableId = select.value;
+      if (!tableId) return;
+      select.disabled = true;
+      try {
+        await openScannedTable(tableId);
+      } finally {
+        renderWaiterTableSelect();
+      }
     });
     $("#logoutButton")?.addEventListener("click", logoutAdmin);
 
@@ -3089,18 +3105,16 @@ const App = (() => {
   };
 
   const openScannedTable = async (value) => {
-    const input = $("#waiterQrForm [name='qr_value']");
-    if (input) input.value = String(value || "").trim();
     let table = tableFromScannedValue(value);
     if (!table) {
       await loadCore();
       table = tableFromScannedValue(value);
     }
     if (!table) {
-      toast("QR no reconocido. Verifica que pertenezca a una mesa activa.", "error", "unknown-table-qr");
+      toast("No se encontro la mesa seleccionada. Actualiza la pagina e intenta de nuevo.", "error", "unknown-service-table");
       return;
     }
-    toast(`${tableLabel(table)} identificada.`, "ok", `scanned:${table.id}`);
+    toast(`${tableLabel(table)} seleccionada.`, "ok", `selected:${table.id}`);
     let session = state.sessions.find((entry) => entry.table_id === table.id && entry.status === "open");
     if (!session) {
       session = await dbQuiet(
