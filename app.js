@@ -234,6 +234,8 @@ const App = (() => {
     billResolutionBusy: false,
     billResolutionTimer: null,
     qrCameraStream: null,
+    qrScanner: null,
+    qrScanBusy: false,
     subscriptions: []
   };
 
@@ -2957,7 +2959,13 @@ const App = (() => {
       event.currentTarget.qr_value.value = "";
       await openScannedTable(value);
     });
-    $("#cameraQrButton")?.addEventListener("click", startQrCamera);
+    $("#cameraQrButton")?.addEventListener("click", startPowerfulQrCamera);
+    $("#imageQrButton")?.addEventListener("click", () => $("#qrImageInput")?.click());
+    $("#qrImageInput")?.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) await scanQrImage(file);
+    });
     $("#logoutButton")?.addEventListener("click", logoutAdmin);
 
     document.addEventListener("change", async (event) => {
@@ -3213,6 +3221,135 @@ const App = (() => {
             ? "La camara esta siendo usada por otra aplicacion. Cierrala y vuelve a intentar."
             : "No se pudo iniciar la camara. Recarga la pagina y vuelve a intentar.";
       toast(message, "error", `qr-camera-${errorName || "failed"}`);
+    }
+  };
+
+  const setQrScanStatus = (message, tone = "scanning") => {
+    const status = $("#qrScanStatus");
+    if (!status) return;
+    status.hidden = !message;
+    status.className = `qr-scan-status ${tone}`;
+    status.textContent = message;
+  };
+
+  const stopPowerfulQrCamera = async (keepStatus = false) => {
+    const scanner = state.qrScanner;
+    state.qrScanner = null;
+    if (scanner) {
+      try {
+        if (scanner.isScanning) await scanner.stop();
+      } catch (error) { /* El navegador pudo cerrar el stream antes que la libreria. */ }
+      try { await Promise.resolve(scanner.clear()); } catch (error) { /* Limpieza opcional. */ }
+    }
+    stopQrCamera();
+    const reader = $("#qrReader");
+    if (reader) {
+      reader.hidden = true;
+      reader.innerHTML = "";
+    }
+    if (!keepStatus) setQrScanStatus("");
+  };
+
+  const handleDecodedQr = async (decodedText) => {
+    const value = String(decodedText || "").trim();
+    if (!value || state.qrScanBusy) return;
+    state.qrScanBusy = true;
+    const input = $("#waiterQrForm [name='qr_value']");
+    if (input) input.value = value;
+    setQrScanStatus("QR detectado. Abriendo la mesa...", "detected");
+    try {
+      await stopPowerfulQrCamera(true);
+      await openScannedTable(value);
+    } finally {
+      state.qrScanBusy = false;
+    }
+  };
+
+  const qrCameraErrorMessage = (error) => {
+    const detail = `${error?.name || ""} ${error?.message || error || ""}`.toLowerCase();
+    if (/notallowed|permission|denied|security/.test(detail)) {
+      return "Permiso de camara bloqueado. Habilitalo para este sitio y vuelve a intentar.";
+    }
+    if (/notfound|devicesnotfound|overconstrained/.test(detail)) {
+      return "No se encontro una camara trasera disponible.";
+    }
+    if (/notreadable|trackstarterror|ocupada|in use/.test(detail)) {
+      return "La camara esta ocupada por otra aplicacion. Cierrala y vuelve a intentar.";
+    }
+    return "No se pudo iniciar el lector. Prueba con Leer foto QR.";
+  };
+
+  const startPowerfulQrCamera = async () => {
+    if (!window.isSecureContext) {
+      toast("La camara requiere abrir el panel desde HTTPS.", "error", "qr-camera-insecure");
+      return;
+    }
+    if (typeof window.Html5Qrcode !== "function") {
+      toast("El lector avanzado no cargo. Recarga la pagina con conexion a internet.", "error", "qr-library-missing");
+      return;
+    }
+    await stopPowerfulQrCamera();
+    state.qrScanBusy = false;
+    const reader = $("#qrReader");
+    if (!reader) return;
+    reader.hidden = false;
+    setQrScanStatus("Solicitando la camara trasera...", "scanning");
+    try {
+      const cameras = await window.Html5Qrcode.getCameras();
+      if (!cameras?.length) throw new Error("NotFoundError: no camera devices");
+      const rearPattern = /back|rear|environment|trasera|posterior|traseira/i;
+      const camera = cameras.find((entry) => rearPattern.test(entry.label || "")) || cameras[cameras.length - 1];
+      const scanner = new window.Html5Qrcode("qrReader", {
+        formatsToSupport: [window.Html5QrcodeSupportedFormats.QR_CODE],
+        verbose: false
+      });
+      state.qrScanner = scanner;
+      await scanner.start(
+        camera.id,
+        {
+          fps: 15,
+          qrbox: (width, height) => {
+            const edge = Math.max(180, Math.floor(Math.min(width, height) * 0.72));
+            return { width: edge, height: edge };
+          },
+          disableFlip: false,
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+        },
+        (decodedText) => { void handleDecodedQr(decodedText); },
+        () => undefined
+      );
+      setQrScanStatus("Lector activo. Centra el QR dentro del recuadro.", "scanning");
+    } catch (error) {
+      await stopPowerfulQrCamera();
+      const message = qrCameraErrorMessage(error);
+      setQrScanStatus(message, "error");
+      toast(message, "error", "qr-advanced-camera-failed");
+    }
+  };
+
+  const scanQrImage = async (file) => {
+    if (typeof window.Html5Qrcode !== "function") {
+      toast("El lector avanzado no cargo. Recarga la pagina.", "error", "qr-library-missing-file");
+      return;
+    }
+    await stopPowerfulQrCamera();
+    const reader = $("#qrReader");
+    if (!reader) return;
+    reader.hidden = false;
+    setQrScanStatus("Analizando la imagen...", "scanning");
+    const scanner = new window.Html5Qrcode("qrReader", {
+      formatsToSupport: [window.Html5QrcodeSupportedFormats.QR_CODE],
+      verbose: false
+    });
+    state.qrScanner = scanner;
+    try {
+      const decodedText = await scanner.scanFile(file, true);
+      await handleDecodedQr(decodedText);
+    } catch (error) {
+      await stopPowerfulQrCamera();
+      const message = "No se encontro un QR legible en la imagen. Acercate y evita reflejos.";
+      setQrScanStatus(message, "error");
+      toast(message, "error", "qr-image-not-readable");
     }
   };
 

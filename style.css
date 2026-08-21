@@ -77,6 +77,39 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
   object-fit: cover;
 }
 
+.qr-reader {
+  width: min(560px, 100%);
+  margin-top: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #08090c;
+}
+
+.qr-reader video,
+.qr-reader canvas,
+.qr-reader img {
+  width: 100% !important;
+  border-radius: 16px;
+  object-fit: cover;
+}
+
+.qr-scan-status {
+  width: min(560px, 100%);
+  margin: 1rem 0 0;
+  padding: .75rem 1rem;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+  color: var(--muted);
+  background: rgba(255,255,255,.05);
+}
+
+.qr-scan-status.detected {
+  color: #b8f7cf;
+  border-color: rgba(57, 217, 138, .4);
+  background: rgba(57, 217, 138, .1);
+}
+
 button, input, select, textarea {
   font: inherit;
 }
