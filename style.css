@@ -135,25 +135,15 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
   background: var(--surface-2);
 }
 
-.service-table-picker select {
-  min-height: 72px;
-  padding: 1rem 3rem 1rem 1.15rem;
-  border: 2px solid color-mix(in srgb, var(--accent) 46%, var(--line));
-  background: var(--surface);
-  font-size: 1.08rem;
-  font-weight: 800;
-  line-height: 1.35;
-  cursor: pointer;
-  touch-action: manipulation;
+.smart-table-combobox {
+  position: relative;
+  z-index: 20;
 }
 
-.service-table-picker select option {
-  padding-block: .85rem;
-  font-size: 1.05rem;
-}
-
-.smart-table-select {
-  display: grid;
+.smart-table-search {
+  position: relative;
+  display: flex;
+  align-items: center;
   overflow: hidden;
   border: 2px solid color-mix(in srgb, var(--accent) 46%, var(--line));
   border-radius: 14px;
@@ -161,15 +151,10 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
   transition: border-color .18s ease, box-shadow .18s ease;
 }
 
-.smart-table-select:focus-within {
+.smart-table-search:focus-within,
+.smart-table-combobox.is-open .smart-table-search {
   border-color: var(--accent);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
-}
-
-.smart-table-search {
-  position: relative;
-  display: flex;
-  align-items: center;
 }
 
 .smart-table-search svg {
@@ -183,19 +168,119 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
 }
 
 .service-table-picker .smart-table-search input {
-  min-height: 58px;
+  width: 100%;
+  min-height: 68px;
   padding: .9rem 2.8rem .9rem 3rem;
   border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
+  border-radius: 12px;
   background: var(--surface);
-  font-weight: 700;
+  color: var(--text);
+  font-size: 1.08rem;
+  font-weight: 800;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
-.service-table-picker .smart-table-select select {
-  min-height: 68px;
-  border: 0;
-  border-radius: 0;
+.smart-table-options {
+  position: absolute;
+  top: calc(100% + .55rem);
+  right: 0;
+  left: 0;
+  z-index: 60;
+  display: grid;
+  gap: .4rem;
+  max-height: min(380px, 45vh);
+  padding: .5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .28);
+  transform-origin: top;
+  animation: table-options-in .16s ease-out;
+  -webkit-overflow-scrolling: touch;
+}
+
+.smart-table-options[hidden] {
+  display: none;
+}
+
+@keyframes table-options-in {
+  from { opacity: 0; transform: translateY(-5px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.smart-table-option {
+  width: 100%;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .75rem;
+  padding: .8rem .9rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+
+.smart-table-option:hover,
+.smart-table-option:focus-visible,
+.smart-table-option.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  outline: 0;
+}
+
+.smart-table-option:active {
+  transform: scale(.985);
+}
+
+.smart-table-option-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  color: var(--accent);
+}
+
+.smart-table-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: .15rem;
+}
+
+.smart-table-option strong {
+  overflow: hidden;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smart-table-option small {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 650;
+}
+
+.smart-table-option > svg:last-child {
+  color: var(--accent);
+}
+
+.smart-table-empty {
+  padding: 1.1rem;
+  color: var(--muted);
+  text-align: center;
+  font-size: .9rem;
+  font-weight: 700;
 }
 
 .table-search-status {
@@ -214,18 +299,17 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
     padding: 1.15rem;
   }
 
-  .service-table-picker select {
-    min-height: 78px;
-    padding-block: 1.15rem;
-    font-size: 1.12rem;
-  }
-
   .service-table-picker .smart-table-search input {
-    min-height: 62px;
+    min-height: 66px;
   }
 
-  .service-table-picker .smart-table-select select {
-    min-height: 78px;
+  .smart-table-options {
+    max-height: 42vh;
+  }
+
+  .smart-table-option {
+    min-height: 68px;
+    padding: .9rem;
   }
 }
 
@@ -237,9 +321,7 @@ body[data-user-role="waiter"] [data-admin-only] { display: none !important; }
     font-size: 16px !important;
   }
 
-  .service-table-picker select {
-    font-size: 1.12rem !important;
-  }
+  .service-table-picker .smart-table-search input { font-size: 16px !important; }
 }
 
 .service-table-picker p {

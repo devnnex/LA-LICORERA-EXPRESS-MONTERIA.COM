@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Admin - Servicio a la mesa</title>
     <link rel="preconnect" href="https://unpkg.com">
-    <link rel="stylesheet" href="style.css?v=20260820-6">
+    <link rel="stylesheet" href="style.css?v=20260820-7">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   </head>
   <body data-page="admin">
@@ -219,19 +219,16 @@
           </div>
         </div>
         <form class="service-table-picker" id="waiterTableForm">
-          <label for="waiterTableSearch">Buscar y seleccionar mesa
-            <span class="smart-table-select">
-              <span class="smart-table-search">
-                <i data-lucide="search"></i>
-                <input id="waiterTableSearch" type="search" inputmode="search" autocomplete="off" placeholder="Ej: Mesa 58, mesa58, 58 o 5 8" aria-controls="waiterTableSelect">
-              </span>
-              <select id="waiterTableSelect" name="table_id" aria-label="Mesas filtradas" disabled>
-                <option value="">Cargando mesas...</option>
-              </select>
+          <label for="waiterTableSearch">Seleccionar mesa</label>
+          <div class="smart-table-combobox" id="waiterTableCombobox">
+            <span class="smart-table-search">
+              <i data-lucide="search"></i>
+              <input id="waiterTableSearch" type="search" inputmode="search" autocomplete="off" placeholder="Buscar mesa" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="waiterTableOptions">
             </span>
-          </label>
+            <div class="smart-table-options" id="waiterTableOptions" role="listbox" aria-label="Mesas disponibles" hidden></div>
+          </div>
           <small class="table-search-status" id="waiterTableSearchStatus" aria-live="polite">Cargando mesas...</small>
-          <p><i data-lucide="mouse-pointer-click"></i> Al seleccionar una mesa se abrira directamente el formulario para agregar su consumo.</p>
+          <p><i data-lucide="mouse-pointer-click"></i> Toca una mesa o escribe su numero y presiona Enter para agregar el consumo.</p>
         </form>
       </section>
 
@@ -285,6 +282,6 @@
 
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-    <script src="app.js?v=20260820-9"></script>
+    <script src="app.js?v=20260820-10"></script>
   </body>
 </html>

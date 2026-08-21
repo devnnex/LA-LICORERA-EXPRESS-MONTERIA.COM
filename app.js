@@ -2227,8 +2227,9 @@ const App = (() => {
   };
 
   const renderWaiterTableSelect = (searchValue) => {
-    const select = $("#waiterTableSelect");
-    if (!select) return;
+    const combobox = $("#waiterTableCombobox");
+    const options = $("#waiterTableOptions");
+    if (!combobox || !options) return;
     const search = $("#waiterTableSearch");
     const status = $("#waiterTableSearchStatus");
     const query = normalizeTableLookup(searchValue === undefined ? search?.value : searchValue);
@@ -2241,26 +2242,99 @@ const App = (() => {
       .sort((a, b) => a.score - b.score || Number(a.table.table_number || 0) - Number(b.table.table_number || 0))
       .map((entry) => entry.table);
     const allActiveCount = state.tables.filter((table) => table.is_active !== false).length;
-    select.innerHTML = activeTables.length
-      ? `<option value="">${query ? `${activeTables.length} resultado(s) · selecciona una mesa...` : "Selecciona una mesa..."}</option>${activeTables.map((table) => {
+    const autoSelectedTable = query && (exactMatches.length === 1 || activeTables.length === 1)
+      ? (exactMatches[0]?.table || activeTables[0])
+      : null;
+    combobox.dataset.selectedId = autoSelectedTable?.id || "";
+    combobox.dataset.activeIndex = autoSelectedTable ? String(activeTables.indexOf(autoSelectedTable)) : "-1";
+    options.innerHTML = activeTables.length
+      ? activeTables.map((table, index) => {
           const defaultName = `Mesa ${table.table_number}`;
           const name = String(table.table_name || "").trim();
-          const label = name && name.toLowerCase() !== defaultName.toLowerCase()
-            ? `${name} (${defaultName})`
-            : defaultName;
-          return `<option value="${escapeHTML(table.id)}">${escapeHTML(label)}</option>`;
-        }).join("")}`
-      : `<option value="">${allActiveCount ? "No se encontraron mesas" : "No hay mesas activas"}</option>`;
-    select.disabled = activeTables.length === 0;
+          const hasCustomName = name && name.toLowerCase() !== defaultName.toLowerCase();
+          const label = hasCustomName ? name : defaultName;
+          const selected = table.id === autoSelectedTable?.id;
+          return `
+            <button type="button" id="waiter-table-option-${index}" class="smart-table-option${selected ? " is-selected" : ""}"
+              data-waiter-table="${escapeHTML(table.id)}" role="option" aria-selected="${selected}">
+              <span class="smart-table-option-icon">${icon("map-pin", 18)}</span>
+              <span class="smart-table-option-copy">
+                <strong>${escapeHTML(label)}</strong>
+                <small>${escapeHTML(hasCustomName ? defaultName : `Numero ${table.table_number}`)}</small>
+              </span>
+              ${selected ? icon("check", 18) : ""}
+            </button>`;
+        }).join("")
+      : `<div class="smart-table-empty">${allActiveCount ? "No encontramos esa mesa" : "No hay mesas activas"}</div>`;
+    search?.setAttribute("aria-activedescendant", autoSelectedTable ? `waiter-table-option-${activeTables.indexOf(autoSelectedTable)}` : "");
     if (status) {
       status.classList.toggle("no-results", Boolean(query && !activeTables.length));
       status.textContent = !allActiveCount
         ? "No hay mesas activas."
         : query
           ? activeTables.length
-            ? `${activeTables.length} de ${allActiveCount} mesas coinciden con la búsqueda.`
-            : `Ninguna mesa coincide con “${String(searchValue === undefined ? search?.value || "" : searchValue).trim()}”.`
+            ? autoSelectedTable
+              ? `${tableLabel(autoSelectedTable)} seleccionada. Presiona Enter para abrirla.`
+              : `${activeTables.length} mesas coinciden. Toca la que necesitas.`
+            : `Ninguna mesa coincide con "${String(searchValue === undefined ? search?.value || "" : searchValue).trim()}".`
           : `${allActiveCount} mesas disponibles.`;
+    }
+    refreshIcons();
+  };
+
+  const showWaiterTableOptions = () => {
+    const combobox = $("#waiterTableCombobox");
+    const options = $("#waiterTableOptions");
+    const search = $("#waiterTableSearch");
+    if (!combobox || !options || !search) return;
+    options.hidden = false;
+    combobox.classList.add("is-open");
+    search.setAttribute("aria-expanded", "true");
+  };
+
+  const closeWaiterTableOptions = () => {
+    const combobox = $("#waiterTableCombobox");
+    const options = $("#waiterTableOptions");
+    const search = $("#waiterTableSearch");
+    if (!combobox || !options || !search) return;
+    options.hidden = true;
+    combobox.classList.remove("is-open");
+    search.setAttribute("aria-expanded", "false");
+  };
+
+  const setWaiterTableActiveIndex = (requestedIndex) => {
+    const combobox = $("#waiterTableCombobox");
+    const options = $("#waiterTableOptions");
+    const search = $("#waiterTableSearch");
+    const buttons = $$('[data-waiter-table]', options);
+    if (!combobox || !search || !buttons.length) return null;
+    const index = (requestedIndex + buttons.length) % buttons.length;
+    buttons.forEach((button, buttonIndex) => {
+      const selected = buttonIndex === index;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-selected", String(selected));
+    });
+    const selectedButton = buttons[index];
+    combobox.dataset.activeIndex = String(index);
+    combobox.dataset.selectedId = selectedButton.dataset.waiterTable || "";
+    search.setAttribute("aria-activedescendant", selectedButton.id);
+    selectedButton.scrollIntoView({ block: "nearest" });
+    return selectedButton;
+  };
+
+  const openWaiterTableChoice = async (tableId) => {
+    const combobox = $("#waiterTableCombobox");
+    if (!tableId || !combobox || combobox.dataset.busy === "true") return;
+    combobox.dataset.busy = "true";
+    $$('[data-waiter-table]', combobox).forEach((button) => { button.disabled = true; });
+    closeWaiterTableOptions();
+    try {
+      await openScannedTable(tableId);
+    } finally {
+      const search = $("#waiterTableSearch");
+      if (search) search.value = "";
+      combobox.dataset.busy = "false";
+      renderWaiterTableSelect();
     }
   };
 
@@ -3095,32 +3169,53 @@ const App = (() => {
       event.preventDefault();
       await saveUser(event.currentTarget);
     });
-    $("#waiterTableSearch")?.addEventListener("input", (event) => {
+    const waiterTableSearch = $("#waiterTableSearch");
+    waiterTableSearch?.addEventListener("input", (event) => {
       renderWaiterTableSelect(event.currentTarget.value);
+      showWaiterTableOptions();
     });
-    $("#waiterTableForm")?.addEventListener("submit", (event) => {
+    waiterTableSearch?.addEventListener("focus", () => {
+      renderWaiterTableSelect();
+      showWaiterTableOptions();
+    });
+    waiterTableSearch?.addEventListener("click", showWaiterTableOptions);
+    waiterTableSearch?.addEventListener("keydown", async (event) => {
+      const combobox = $("#waiterTableCombobox");
+      const buttons = $$('[data-waiter-table]', $("#waiterTableOptions"));
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        showWaiterTableOptions();
+        const currentIndex = Number(combobox?.dataset.activeIndex ?? -1);
+        const nextIndex = currentIndex < 0
+          ? (event.key === "ArrowDown" ? 0 : buttons.length - 1)
+          : (event.key === "ArrowDown" ? currentIndex + 1 : currentIndex - 1);
+        setWaiterTableActiveIndex(nextIndex);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const selectedId = combobox?.dataset.selectedId || (buttons.length === 1 ? buttons[0].dataset.waiterTable : "");
+        if (selectedId) await openWaiterTableChoice(selectedId);
+        else showWaiterTableOptions();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeWaiterTableOptions();
+      }
+    });
+    $("#waiterTableOptions")?.addEventListener("click", async (event) => {
+      const option = event.target.closest("[data-waiter-table]");
+      if (option) await openWaiterTableChoice(option.dataset.waiterTable);
+    });
+    $("#waiterTableForm")?.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const select = $("#waiterTableSelect");
-      const matches = Array.from(select?.options || []).filter((option) => option.value);
-      if (matches.length === 1 && select) {
-        select.value = matches[0].value;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      } else {
-        select?.focus({ preventScroll: true });
-      }
+      const selectedId = $("#waiterTableCombobox")?.dataset.selectedId;
+      if (selectedId) await openWaiterTableChoice(selectedId);
+      else showWaiterTableOptions();
     });
-    $("#waiterTableSelect")?.addEventListener("change", async (event) => {
-      const select = event.currentTarget;
-      const tableId = select.value;
-      if (!tableId) return;
-      select.disabled = true;
-      try {
-        await openScannedTable(tableId);
-      } finally {
-        const search = $("#waiterTableSearch");
-        if (search) search.value = "";
-        renderWaiterTableSelect();
-      }
+    document.addEventListener("pointerdown", (event) => {
+      if (!event.target.closest("#waiterTableCombobox")) closeWaiterTableOptions();
     });
     $("#logoutButton")?.addEventListener("click", logoutAdmin);
 
