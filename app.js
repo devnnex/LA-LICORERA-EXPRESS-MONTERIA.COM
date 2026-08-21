@@ -71,15 +71,62 @@ const App = (() => {
     bill: "images/check.png"
   };
   const RECEIPT_SOUND = "sound/receipt-received.mp3";
+  const BAR_ASSISTANT_OPTIONS = [
+    {
+      name: "Canasta de cerveza",
+      aliases: ["canasta cerveza", "canasta de cervezas", "canasta de birra"],
+      detail: "Canasta de cerveza para compartir; el mesero confirma marcas y disponibilidad."
+    },
+    {
+      name: "Ron Medellín",
+      aliases: ["ron medellin", "medellin", "botella de ron medellin"],
+      detail: "Ron Medellín; el mesero confirma la presentación disponible."
+    },
+    {
+      name: "Aguardiente",
+      aliases: ["guaro", "aguardiente antioqueno", "aguardiente antioqueño", "botella de aguardiente"],
+      detail: "Aguardiente; el mesero confirma marca y presentación."
+    },
+    {
+      name: "Whisky",
+      aliases: ["whiskey", "botella de whisky", "media de whisky"],
+      detail: "Whisky; el mesero confirma marcas y presentaciones disponibles."
+    },
+    {
+      name: "Vodka",
+      aliases: ["botella de vodka", "media de vodka"],
+      detail: "Vodka; el mesero confirma marcas y presentaciones disponibles."
+    },
+    {
+      name: "Tequila",
+      aliases: ["botella de tequila", "shots de tequila", "shot de tequila"],
+      detail: "Tequila por botella o por shots, sujeto a disponibilidad."
+    },
+    {
+      name: "Cóctel",
+      aliases: ["coctel", "cocteles", "cócteles", "trago preparado"],
+      detail: "Cóctel preparado; el mesero comparte las opciones disponibles."
+    },
+    {
+      name: "Cerveza individual",
+      aliases: ["una cerveza", "cerveza", "cervezas", "birra"],
+      detail: "Cerveza individual; el mesero confirma las marcas disponibles."
+    },
+    {
+      name: "Bebida sin alcohol",
+      aliases: ["gaseosa", "soda", "agua", "jugos", "bebida sin alcohol"],
+      detail: "Agua, gaseosa u otra bebida sin alcohol, según disponibilidad."
+    }
+  ];
   const ASSISTANT_SYSTEM_PROMPT = [
     "Eres el agente virtual del bar y atiendes al cliente desde su mesa con tono amable, claro y profesional.",
     "Entiendes frases naturales para pedir bebidas y productos, ver la cuenta, llamar al mesero, consultar la carta o preguntar precios.",
-    "Cuando un pedido coincide con la carta cargada, calculas cantidad, precio unitario y total antes de avisar al equipo.",
+    "Cuando reconoces un pedido, identificas el producto y la cantidad y avisas al mesero para que confirme los detalles.",
     "Si falta una mesa, no permites enviar pedidos ni solicitudes; primero pides verificar la mesa.",
-    "Si el cliente pregunta por una bebida, presentación o precio, informas sin crear el pedido hasta que exprese intención de ordenar.",
-    "Si no reconoces el producto o el precio exacto, envías la solicitud al equipo para validación y se lo explicas al cliente.",
+    "No informas precios ni inventas presentaciones; el mesero confirma marcas, tamaños, disponibilidad y valores.",
+    "Si no reconoces el producto exacto, envías igualmente la solicitud al equipo y se lo explicas al cliente.",
     "Siempre corriges ortografía, tildes, mayúsculas, puntos y comas en los mensajes que llegan al administrador.",
-    "No inventas bebidas, marcas, presentaciones ni precios fuera de la carta cargada; confirmas con el equipo cuando haga falta."
+    "Trabajas con una guía interna de opciones de bar y no consultas el catálogo de productos de la base de datos."
   ].join("\n");
 
   const ASSISTANT_INTENTS = {
@@ -1208,34 +1255,25 @@ const App = (() => {
     return names.join(", ");
   };
 
-  const assistantPriceList = (item) =>
-    Object.entries(item.prices)
-      .map(([size, price]) => `${size === "default" ? "precio" : `${size} onzas`}: ${money(price)}`)
-      .join(", ");
-
   const findQuantityWord = (normalized) => {
     const words = normalized.split(" ");
     const found = words.find((word) => ASSISTANT_NUMBER_WORDS[word]);
     return found ? ASSISTANT_NUMBER_WORDS[found] : null;
   };
 
-  const assistantOptions = () =>
-    state.items
-      .filter((item) => item.is_available)
-      .map((item) => ({
-        name: item.name,
-        prices: { default: Number(item.price || 0) },
-        detail: item.description || "Producto disponible en la carta del bar.",
-        menu_item_id: item.id
-      }));
+  const assistantOptions = () => BAR_ASSISTANT_OPTIONS;
 
   const findAssistantItem = (message) => {
     const normalized = normalizeText(message);
     let best = null;
     assistantOptions().forEach((item) => {
-      const words = normalizeText(item.name).split(" ").filter((word) => word.length > 2);
-      const score = words.reduce((sum, word) => sum + (normalized.includes(word) ? 1 : 0), 0) / Math.max(words.length, 1);
-      if (score >= .55 && (!best || score > best.score)) best = { item, score };
+      [item.name, ...(item.aliases || [])].forEach((candidate) => {
+        const normalizedCandidate = normalizeText(candidate);
+        const words = normalizedCandidate.split(" ").filter((word) => word.length > 2);
+        const overlap = words.reduce((sum, word) => sum + (normalized.includes(word) ? 1 : 0), 0) / Math.max(words.length, 1);
+        const score = normalized.includes(normalizedCandidate) ? 1 + words.length / 100 : overlap;
+        if (score >= .6 && (!best || score > best.score)) best = { item, score };
+      });
     });
     return best?.item || null;
   };
@@ -1244,17 +1282,11 @@ const App = (() => {
     const item = findAssistantItem(message);
     if (!item) return null;
     const normalized = normalizeText(message);
-    const quantityMatch = normalized.match(/\b(\d+)\s*x\b|\b(\d+)\s+(?:unidades|ordenes|botellas|cervezas|tragos|cocteles|bebidas)\b/);
-    const sizeMatch = normalized.match(/\b(8|12|16)\s*(?:oz|onzas|onza)?\b/);
-    const sizes = Object.keys(item.prices);
-    const size = sizeMatch?.[1] && item.prices[sizeMatch[1]]
-      ? sizeMatch[1]
-      : sizes.includes("12")
-        ? "12"
-        : sizes[0];
-    const quantity = Math.max(1, Number(quantityMatch?.[1] || quantityMatch?.[2] || findQuantityWord(normalized) || 1));
-    const price = Number(item.prices[size] || item.prices.default || 0);
-    return { item, size, quantity, price };
+    const numericQuantity = [...normalized.matchAll(/\b(\d+)\b/g)]
+      .map((match) => Number(match[1]))
+      .find((value) => value >= 1 && value <= 20);
+    const quantity = Math.max(1, Number(numericQuantity || findQuantityWord(normalized) || 1));
+    return { item, quantity };
   };
 
   const assistantSay = (role, text) => {
@@ -1269,13 +1301,13 @@ const App = (() => {
     if (!chat || !suggestions) return;
     const messages = state.assistantMessages.length
       ? state.assistantMessages
-      : [{ role: "bot", text: "Hola. Soy tu agente de bar. Puedo ayudarte a consultar la carta, pedir bebidas y productos, ver tu cuenta o llamar al mesero." }];
+      : [{ role: "bot", text: "Hola, soy tu agente de bar. Dime qué deseas pedir y enviaré la solicitud al mesero para que confirme contigo los detalles." }];
     chat.innerHTML = messages
       .map((message) => `<div class="assistant-message ${message.role}">${escapeHTML(message.text)}</div>`)
       .join("");
     chat.scrollTop = chat.scrollHeight;
     const productSuggestions = assistantOptions().slice(0, 2).map((item) => `Quiero ${item.name}`);
-    const suggestionTexts = [...productSuggestions, "¿Qué bebidas tienen?", "Ver mi cuenta", "Llamar al mesero"].slice(0, 3);
+    const suggestionTexts = [...productSuggestions, "Ver mi cuenta", "Llamar al mesero"].slice(0, 3);
     suggestions.innerHTML = suggestionTexts
       .map((text) => `<button type="button" class="chip" data-assistant-suggest="${escapeHTML(text)}">${escapeHTML(text)}</button>`)
       .join("");
@@ -1425,36 +1457,21 @@ const App = (() => {
   };
 
   const describeAssistantItem = (item) =>
-    `${item.name}: ${item.detail} Precios: ${assistantPriceList(item)}.`;
+    `${item.name}: ${item.detail}`;
 
   const addAssistantOrder = async (order, originalMessage) => {
     if (!state.currentTable) {
       assistantSay("bot", "Primero selecciona tu mesa para poder enviar el pedido correctamente.");
       return;
     }
-    const session = await ensureOpenSession(state.currentTable.id);
-    if (!session) return;
-    const itemName = `${order.item.name}${order.size !== "default" ? ` ${order.size} onzas` : ""}`;
-    const payload = {
-      session_id: session.id,
-      table_id: state.currentTable.id,
-      menu_item_id: order.item.menu_item_id || null,
-      item_name: itemName,
-      quantity: order.quantity,
-      unit_price: order.price,
-      notes: originalMessage,
-      status: "pending"
-    };
-    const saved = await db(state.sb.from("session_items").insert(payload).select("*").single(), null);
-    if (!saved) return;
-    const total = order.quantity * order.price;
-    await createServiceNotification(
+    await ensureOpenSession(state.currentTable.id);
+    const request = await createServiceNotification(
       "other",
-      `${tableLabel(state.currentTable)} solicitó ${order.quantity} x ${itemName}. Total: ${money(total)}.`
+      `${tableLabel(state.currentTable)} solicita atención para pedir ${order.quantity} x ${order.item.name}. Mensaje del cliente: ${polishGuestText(originalMessage)}`
     );
-    await loadClientSessionItems();
-    renderAccount();
-    assistantSay("bot", `Perfecto, agregué ${order.quantity} x ${itemName} por ${money(total)}. Ya avisamos al equipo.`);
+    if (request) {
+      assistantSay("bot", `Perfecto. Ya envié tu solicitud de ${order.quantity} x ${order.item.name}. El mesero te atenderá para confirmar los detalles.`);
+    }
   };
 
   const handleAssistantMessage = async (message) => {
@@ -1479,17 +1496,19 @@ const App = (() => {
     const wantsOrder = assistantUnderstands(normalized, "order") || Boolean(item && !asksInquiry);
 
     if (asksCapabilities && !wantsOrder && !asksMenu && !asksBill && !asksWaiter) {
-      assistantSay("bot", "Soy tu agente de bar. Puedo mostrarte la carta, consultar precios, pedir bebidas o productos, ver tu cuenta y llamar al mesero. Si algo no aparece con precio exacto, lo envío al equipo para confirmación.");
+      assistantSay("bot", "Soy tu agente de bar. Puedes pedirme una canasta de cerveza, Ron Medellín, aguardiente, whisky, vodka, tequila, cócteles u otras bebidas. Enviaré tu solicitud al mesero para que confirme los detalles.");
       return;
     }
     if (asksMenu && !item) {
       const summary = assistantMenuSummary();
       assistantSay("bot", summary
-        ? `En la carta tenemos ${summary}. Puedes escribir el nombre del producto y la cantidad que deseas.`
-        : "La carta del bar se está actualizando. Puedes llamar al mesero para consultar las opciones disponibles.");
+        ? `Puedo ayudarte con opciones como ${summary}. Dime cuál deseas y la cantidad; el mesero confirmará los detalles.`
+        : "Dime qué deseas pedir y enviaré la solicitud al mesero.");
       return;
     }
-    if (wantsOrder && !item && normalized.split(" ").length <= 3) {
+    const genericOrderRequest = ["quiero pedir", "quiero ordenar", "voy a pedir", "voy a ordenar"]
+      .includes(normalized);
+    if (wantsOrder && !item && genericOrderRequest) {
       const summary = assistantMenuSummary();
       assistantSay("bot", summary
         ? `Claro. Puedes pedir opciones como ${summary}. Escríbeme el nombre exacto de la bebida o producto y la cantidad.`
@@ -1520,8 +1539,8 @@ const App = (() => {
       void addAssistantOrder(order, text);
       return;
     }
-    assistantSay("bot", "No lo encontré con precio exacto en el menú, pero ya envié tu solicitud al equipo para confirmarla.");
-    void createServiceNotification("other", `${tableLabel(state.currentTable)} solicitó: ${polishGuestText(text)} Validar con cocina o atención.`);
+    assistantSay("bot", "Entendido. Ya envié tu solicitud para que el mesero te atienda y confirme los detalles.");
+    void createServiceNotification("other", `${tableLabel(state.currentTable)} solicita atención: ${polishGuestText(text)}`);
   };
 
   const addItemToSession = async (itemId) => {
