@@ -260,6 +260,7 @@ const App = (() => {
     adminSyncBusy: false,
     activeAdminSection: "dashboard",
     qrCache: new Map(),
+    selectedTableQrIds: new Set(),
     tableRenderSignature: "",
     assistantMessages: [],
     tableLocked: false,
@@ -2184,19 +2185,27 @@ const App = (() => {
   const renderTableManager = () => {
     const list = $("#tableManagerList");
     if (!list) return;
+    const validIds = new Set(state.tables.map((table) => String(table.id)));
+    state.selectedTableQrIds = new Set(
+      [...state.selectedTableQrIds].filter((id) => validIds.has(String(id)))
+    );
     list.innerHTML = state.tables.length
       ? state.tables
           .map(
             (table) => `
-              <div class="manager-row table-manager-row">
+              <div class="manager-row table-manager-row${state.selectedTableQrIds.has(String(table.id)) ? " is-selected" : ""}">
+                <label class="qr-table-checkbox" title="Seleccionar ${escapeHTML(tableLabel(table))}">
+                  <input type="checkbox" data-select-table-qr="${table.id}" ${state.selectedTableQrIds.has(String(table.id)) ? "checked" : ""}>
+                  <span>${icon("check", 16)}</span>
+                </label>
                 <div class="qr-mini" data-table-qr="${table.id}"></div>
-                <div>
+                <div class="table-manager-copy">
                   <strong>${escapeHTML(tableLabel(table))}</strong>
                   <span>${qrTextForTable(table)}</span>
                 </div>
                 <div class="row-actions">
                   <button class="icon-btn" data-edit-table="${table.id}" aria-label="Editar mesa">${icon("pencil", 17)}</button>
-                  <button class="icon-btn" data-download-qr="${table.id}" aria-label="Descargar QR">${icon("download", 17)}</button>
+                  <button class="icon-btn" data-download-qr="${table.id}" aria-label="Descargar QR en PDF de 6 por 6 centimetros">${icon("file-down", 17)}</button>
                   <button class="icon-btn" data-regenerate-qr="${table.id}" aria-label="Rehacer QR">${icon("refresh-cw", 17)}</button>
                   <button class="icon-btn danger" data-delete-table="${table.id}" aria-label="Eliminar mesa">${icon("trash-2", 17)}</button>
                 </div>
@@ -2205,8 +2214,25 @@ const App = (() => {
           )
           .join("")
       : emptyState("Sin mesas", "Agrega una mesa para generar su QR.", "qr-code");
+    renderQrBatchControls();
     refreshIcons();
     renderGeneratedTableQrs();
+  };
+
+  const renderQrBatchControls = () => {
+    const count = state.selectedTableQrIds.size;
+    const countLabel = $("#qrSelectionCount");
+    const downloadButton = $("#downloadSelectedQrs");
+    const selectAllButton = $("#selectAllTableQrs");
+    const clearButton = $("#clearTableQrs");
+    if (countLabel) countLabel.textContent = `${count} ${count === 1 ? "seleccionada" : "seleccionadas"}`;
+    if (downloadButton) {
+      downloadButton.disabled = count === 0;
+      downloadButton.innerHTML = `${icon("file-down", 18)} Descargar PDF${count ? ` (${count})` : ""}`;
+    }
+    if (selectAllButton) selectAllButton.disabled = !state.tables.length || count === state.tables.length;
+    if (clearButton) clearButton.disabled = count === 0;
+    refreshIcons();
   };
 
   const normalizeTableLookup = (value = "") =>
@@ -3038,17 +3064,141 @@ const App = (() => {
     }
   };
 
+  const pdfSafeText = (value = "") => String(value)
+    .replace(/[Ⓡⓡ]/g, "®")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim();
+
+  const pdfAccentColor = () => {
+    const value = String(state.business?.accent_color || "#f05a28").trim();
+    const match = /^#([0-9a-f]{6})$/i.exec(value);
+    if (!match) return [240, 90, 40];
+    return [
+      parseInt(match[1].slice(0, 2), 16),
+      parseInt(match[1].slice(2, 4), 16),
+      parseInt(match[1].slice(4, 6), 16)
+    ];
+  };
+
+  const fitPdfText = (pdf, text, maxWidth, maxFontSize, minFontSize = 6) => {
+    let fontSize = maxFontSize;
+    pdf.setFontSize(fontSize);
+    while (fontSize > minFontSize && pdf.getTextWidth(text) > maxWidth) {
+      fontSize -= 0.5;
+      pdf.setFontSize(fontSize);
+    }
+    return fontSize;
+  };
+
+  const drawQrCutMarks = (pdf, x, y, size) => {
+    const mark = 2;
+    const offset = 0.8;
+    pdf.setDrawColor(150, 156, 166);
+    pdf.setLineWidth(0.15);
+    [[x, y], [x + size, y], [x, y + size], [x + size, y + size]].forEach(([cornerX, cornerY], index) => {
+      const horizontalDirection = index % 2 === 0 ? -1 : 1;
+      const verticalDirection = index < 2 ? -1 : 1;
+      pdf.line(cornerX + horizontalDirection * offset, cornerY, cornerX + horizontalDirection * (offset + mark), cornerY);
+      pdf.line(cornerX, cornerY + verticalDirection * offset, cornerX, cornerY + verticalDirection * (offset + mark));
+    });
+  };
+
+  const drawQrPdfCard = async (pdf, table, x, y) => {
+    const cardSize = 60;
+    const [red, green, blue] = pdfAccentColor();
+    const rawName = pdfSafeText(table.table_name);
+    const fallbackName = `MESA ${table.table_number}`;
+    const primaryName = (rawName || fallbackName).toUpperCase();
+    const normalizedPrimary = primaryName.replace(/\s+/g, "");
+    const normalizedFallback = fallbackName.replace(/\s+/g, "");
+    const secondaryName = normalizedPrimary === normalizedFallback ? "ESCANEA EL CODIGO" : fallbackName;
+    const businessName = pdfSafeText(state.business?.business_name || "Servicio a la mesa").toUpperCase();
+    const qrDataUrl = await cachedQrDataUrl(qrTextForTable(table), 1000);
+
+    pdf.setFillColor(255, 255, 255);
+    pdf.setDrawColor(30, 35, 43);
+    pdf.setLineWidth(0.25);
+    pdf.roundedRect(x, y, cardSize, cardSize, 1.2, 1.2, "FD");
+    pdf.setFillColor(red, green, blue);
+    pdf.rect(x, y, cardSize, 1.6, "F");
+
+    pdf.setTextColor(92, 99, 112);
+    pdf.setFont("helvetica", "bold");
+    fitPdfText(pdf, businessName, 43, 6, 3.8);
+    pdf.text(businessName, x + cardSize / 2, y + 5.1, { align: "center" });
+
+    pdf.setTextColor(20, 23, 29);
+    fitPdfText(pdf, primaryName, 52, 12.5, 7.5);
+    pdf.text(primaryName, x + cardSize / 2, y + 10.1, { align: "center" });
+
+    pdf.setTextColor(red, green, blue);
+    pdf.setFont("helvetica", "bold");
+    fitPdfText(pdf, secondaryName, 48, 5.7, 4.8);
+    pdf.text(secondaryName, x + cardSize / 2, y + 12.8, { align: "center" });
+
+    pdf.addImage(qrDataUrl, "PNG", x + 10.2, y + 14.2, 39.6, 39.6, undefined, "FAST");
+
+    pdf.setTextColor(74, 81, 92);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(5.5);
+    pdf.text("ORDENA Y SOLICITA ATENCION DESDE TU MESA", x + cardSize / 2, y + 57.2, { align: "center" });
+    drawQrCutMarks(pdf, x, y, cardSize);
+  };
+
+  const downloadQrPdf = async (tables) => {
+    const jsPDF = window.jspdf?.jsPDF;
+    if (!jsPDF) {
+      toast("No se pudo cargar el generador de PDF. Revisa la conexion e intenta de nuevo.", "error", "pdf-library-missing");
+      return;
+    }
+    const printableTables = (tables || []).filter(Boolean);
+    if (!printableTables.length) {
+      toast("Selecciona al menos una mesa para generar el PDF.", "error", "no-qr-selection");
+      return;
+    }
+    const downloadButton = $("#downloadSelectedQrs");
+    if (downloadButton) {
+      downloadButton.disabled = true;
+      downloadButton.innerHTML = `${icon("loader-circle", 18)} Generando PDF...`;
+      refreshIcons();
+    }
+    try {
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
+      const columns = 3;
+      const rows = 4;
+      const cardsPerPage = columns * rows;
+      const cardSize = 60;
+      const gap = 5;
+      const startX = 10;
+      const startY = 21;
+      for (let index = 0; index < printableTables.length; index += 1) {
+        if (index > 0 && index % cardsPerPage === 0) pdf.addPage("a4", "portrait");
+        const pageIndex = index % cardsPerPage;
+        const column = pageIndex % columns;
+        const row = Math.floor(pageIndex / columns);
+        await drawQrPdfCard(pdf, printableTables[index], startX + column * (cardSize + gap), startY + row * (cardSize + gap));
+      }
+      const filename = printableTables.length === 1
+        ? `qr-mesa-${printableTables[0].table_number}-6x6.pdf`
+        : `qr-${printableTables.length}-mesas-6x6.pdf`;
+      pdf.save(filename);
+      toast(`${printableTables.length} ${printableTables.length === 1 ? "QR listo" : "QR listos"} en PDF de 6 x 6 cm.`);
+    } catch (error) {
+      console.error(error);
+      toast("No se pudo generar el PDF de los QR. Intenta de nuevo.", "error", "qr-pdf-failed");
+    } finally {
+      renderQrBatchControls();
+    }
+  };
+
   const downloadQr = async (id) => {
-    const table = state.tables.find((entry) => entry.id === id);
-    if (!table) return;
-    const dataUrl = await generateQrDataUrl(qrTextForTable(table), 1200);
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = `qr-mesa-${table.table_number}.png`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    toast(`QR de ${tableLabel(table)} listo para imprimir.`);
+    const table = state.tables.find((entry) => String(entry.id) === String(id));
+    if (table) await downloadQrPdf([table]);
+  };
+
+  const downloadSelectedQrs = async () => {
+    const tables = state.tables.filter((table) => state.selectedTableQrIds.has(String(table.id)));
+    await downloadQrPdf(tables);
   };
 
   const regenerateQr = async (id) => {
@@ -3220,6 +3370,14 @@ const App = (() => {
     $("#logoutButton")?.addEventListener("click", logoutAdmin);
 
     document.addEventListener("change", async (event) => {
+      if (event.target.matches("[data-select-table-qr]")) {
+        const id = String(event.target.dataset.selectTableQr);
+        if (event.target.checked) state.selectedTableQrIds.add(id);
+        else state.selectedTableQrIds.delete(id);
+        event.target.closest(".table-manager-row")?.classList.toggle("is-selected", event.target.checked);
+        renderQrBatchControls();
+        return;
+      }
       if (event.target.id === "alertFilter") {
         state.alertFilter = event.target.value || "all";
         renderAlerts();
@@ -3257,6 +3415,15 @@ const App = (() => {
       if (target.id === "enableSound") {
         await unlockAlarm();
       }
+      if (target.id === "selectAllTableQrs") {
+        state.selectedTableQrIds = new Set(state.tables.map((table) => String(table.id)));
+        renderTableManager();
+      }
+      if (target.id === "clearTableQrs") {
+        state.selectedTableQrIds.clear();
+        renderTableManager();
+      }
+      if (target.id === "downloadSelectedQrs") await downloadSelectedQrs();
       if (target.dataset.acceptRequest) await acceptRequest(target.dataset.acceptRequest);
       if (target.dataset.sendBill) await sendBillToClient(target.dataset.sendBill);
       if (target.dataset.closeSession) await closeSession(target.dataset.closeSession);

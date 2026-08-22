@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Admin - Servicio a la mesa</title>
     <link rel="preconnect" href="https://unpkg.com">
-    <link rel="stylesheet" href="style.css?v=20260820-7">
+    <link rel="stylesheet" href="style.css?v=20260822-1">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   </head>
   <body data-page="admin">
@@ -152,6 +152,21 @@
             <label class="check"><input name="is_active" type="checkbox" checked> Activa</label>
             <button class="primary" type="submit"><i data-lucide="save"></i> Guardar mesa</button>
           </form>
+          <div class="qr-batch-panel" id="qrBatchPanel">
+            <div class="qr-batch-copy">
+              <span class="eyebrow">Impresion profesional</span>
+              <strong>QR identificados de 6 x 6 cm</strong>
+              <small>Selecciona las mesas y descarga un PDF listo para imprimir y recortar.</small>
+            </div>
+            <div class="qr-batch-actions">
+              <span class="qr-selection-count" id="qrSelectionCount" aria-live="polite">0 seleccionadas</span>
+              <button class="ghost small" id="selectAllTableQrs" type="button">Seleccionar todas</button>
+              <button class="ghost small" id="clearTableQrs" type="button">Limpiar</button>
+              <button class="primary" id="downloadSelectedQrs" type="button" disabled>
+                <i data-lucide="file-down"></i> Descargar PDF
+              </button>
+            </div>
+          </div>
           <div class="manager-list" id="tableManagerList"></div>
         </div>
 
@@ -282,6 +297,7 @@
 
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-    <script src="app.js?v=20260820-10"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="app.js?v=20260822-2"></script>
   </body>
 </html>
